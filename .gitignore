@@ -1,0 +1,11 @@
+.DS_Store
+.backup
+__pycache__
+output*
+outer_demo
+*.log
+*.log.full
+TEMP*
+workdir
+
+nltk_data
