@@ -1,0 +1,22 @@
+
+Example with unorinary sig cycle: ±600 cases
+29282 | carboplatin | 2 cycles, with the second cycle starting after "recovery of granulocyte and platelet counts" | Variant #09 | -5,-4,-3 
+29282 | etoposide | 2 cycles, with the second cycle starting after "recovery of granulocyte and platelet counts" | Variant #09 | -5,-4,-3 
+
+                    '''' how many days this is ?                                                                                '''' how to parse these?
+
+                                                                                                                                [-5 -3 ] 2 cycle 
+                        2 days ?
+
+                    # Another problem: 
+                    length of cycles are undetermined AND duration migth differ.
+
+
+Example 2: Missmatch of cyclesigs compared to HemOnc wiki
+
+regimen_cui | component | cyclesigs | variant | allDays | condition
+================================================================================
+2822 | ipilimumab | 21-day cycles | Nivolumab AND Platinum doublet | Variant #01 | 1 | Non-small cell lung cancer
+2822 | nivolumab | 21-day cycles | Nivolumab AND Platinum doublet | Variant #01 | 1 | Non-small cell lung cancer
+2822 | carboplatin | 21-day cycle for 2 cycles | Variant #01 | 1  
+2822 | paclitaxel | 21-day cycle for 2 cycles | Variant #01 | 1  

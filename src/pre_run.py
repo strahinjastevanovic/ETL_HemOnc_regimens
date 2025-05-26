@@ -268,16 +268,20 @@ def pre_run(
         log_dir=log_dir
     )
 
+    skip_hvc_all=list(set(['component', 'regulator', 'date', 'condition', 'accelerated', 'withdrawn', 'first_in_class', 'note', 'context', 'stage_or_status', 'risk_stratification', 'demographics', 'ineligibility', 'prior_therapy', 'prior_therapy_negation', 'prior_therapy_setting', 'response_contingency', 'time_contingency', 'prior_biomarker', 'with', 'biomarker', 'biomarker_negation', 'study_yn', 'study', 'string', 'date_added',
+                  'study', 'regimen', 'regimen_cui', 'phase', 'portion', 'component', 'component_cui', 'component_role', 'cycle_length_lb', 'cycle_length_ub', 'cycle_length_unit', 'timing_sequence', 'timing_unit', 'timing', 'timing_bounded', 'branch', 'branch_type', 'cyclesigs', 'cyclesigs_note', 'step_number', 'class', 'doseMinNum', 'doseMaxNum', 'doseUnit', 'doseUnit_cui', 'divided', 'doseCapNum', 'doseCapUnit', 'doseCapUnit_cui', 'route', 'route_cui', 'allDays', 'durationMinNum', 'durationMaxNum', 'durationUnit', 'durationUnit_cui', 'frequency', 'frequency_cui', 'inParens', 'sequence', 'seq.rel.when', 'seq.rel.when.unit', 'seq.rel', 'seq.rel.what', 'tail', 'variant', 'variant_cui', 'temp', 'date_added']))
+    
     matches = r.extract_matches(
         threshold=0.8,
-        skip_hvc={"string", "study", "component","regulator", "date", "prior_therapy"},
+        skip_hvc={"string", "study", "component","regulator", "date"}, # non important...
         skip_words={
             "aromatase inhibitor",
             "surgery", "iodine", "ros1", "and", "or", "with", "egfr tki", "one", "other", "inhibitor", "alk",
             "resection", "chemotherapy", "radiotherapy", "platinum", "regimen", "therapy", "not", "applicable",
             "surgical castration", "androgen receptor inhibitor", "steroids", "antiestrogen",
             "anticoagulation", "contraindication to cisplatin", "cisplatin-ineligible",
-            "1+ including auto hsct unless ineligible", "autologous hsct", "immunomodulator", "anti-cd38 antibody"
+            "1+ including auto hsct unless ineligible", "autologous hsct", "immunomodulator", "anti-cd38 antibody",
+            
         }
     )
 
