@@ -9,3 +9,4 @@ TEMP*
 workdir
 
 nltk_data
+.vscode/settings.json
