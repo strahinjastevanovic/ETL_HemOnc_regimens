@@ -58,3 +58,5 @@ sg = sg.merge(
     right_on="c1_code",
     how="left",
 )
+
+sg.to_csv("INPUT_FILES_HEMONC/sigs_w_conditions.csv", index=False)
