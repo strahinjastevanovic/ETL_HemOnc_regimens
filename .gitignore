@@ -9,3 +9,6 @@ TEMP*
 workdir
 
 nltk_data
+.vscode/settings.json
+queries/vocab.session.sql
+INPUT_FILES_HEMONC/sigs_conditions.csv

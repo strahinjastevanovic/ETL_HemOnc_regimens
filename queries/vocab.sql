@@ -160,3 +160,30 @@ WHERE c1.vocabulary_id = 'HemOnc'
     c2.domain_id IS DISTINCT FROM c2.concept_class_id
   )
 LIMIT 5;
+
+
+-- query to get all concept condition pairs
+SELECT DISTINCT ON (c1.concept_id, c2.concept_id)
+  c1.concept_id           as c1_id, -- regimen_cui in sigs
+  c1.concept_name         as c1_name, -- regimen in sigs
+  c1.domain_id            as c1_domain, 
+  c1.concept_class_id     as c1_class,
+
+  c2.concept_id           as c2_id, -- condition_cui in sigs 
+  c2.concept_name         as c2_name, -- condition in sigs 
+  c2.domain_id            as c2_domain,
+  c2.concept_class_id     as c2_class
+
+from devv5.concept c1
+join devv5.concept_relationship r 
+  on r.concept_id_1 = c1.concept_id and r.invalid_reason is null
+join devv5.concept c2 
+  on c2.concept_id = r.concept_id_2
+
+where c1.vocabulary_id = 'HemOnc'
+  and (
+    (c2.concept_class_id = 'Condition' or c2.domain_id = 'Condition')
+    and
+    (c1.domain_id = 'Regimen' or c1.concept_class_id = 'Regimen')
+  )
+-- )
