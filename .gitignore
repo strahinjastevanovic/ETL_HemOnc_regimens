@@ -8,7 +8,11 @@ outer_demo
 TEMP*
 workdir
 
+tmp.*
+
 nltk_data
 .vscode/settings.json
 queries/vocab.session.sql
 INPUT_FILES_HEMONC/sigs_conditions.csv
+
+.env

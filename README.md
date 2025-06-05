@@ -1,9 +1,14 @@
-# How to use
+# About
+ETL pipeline for creating regimens from HemOnc datasets (sigs table)
 
-Run 
+See `ETL_Pipeline_Documentation.md`
 
-`MAIN.sh -out workdir`
+# Setup and Run
 
+1. Use requirements.txt to create env.
 
-# Full doc
-Checkout `ETL_Pipeline_Documentation.md`
+2. Create `.env` based on provided `template`.
+
+then
+
+3. `MAIN.sh -out workdir`

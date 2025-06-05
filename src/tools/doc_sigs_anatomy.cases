@@ -1,0 +1,251 @@
+# Note : Best to assess cases against cycle_length_unit 
+
+# array(['indeterminate', 'day', 'week', 'month'], dtype=object)
+
+# Case 1:
+#         
+#               component               allDays cycle_length_ub  cycle_length_lb cycle_length_unit timing_sequence
+# 23463        Cytarabine                   1,2               1              1.0     indeterminate           1,4,7
+# 23464     Dexamethasone                   1,2               1              1.0     indeterminate           1,4,7
+# 23465    Mercaptopurine  15,16,17,18,19,20,21               1              1.0     indeterminate           2,5,8
+# 23466       Vincristine                    15               1              1.0     indeterminate           2,5,8
+# 23467  Cyclophosphamide                 29,30               1              1.0     indeterminate           3,6,9
+# 23468         Etoposide                 29,30               1              1.0     indeterminate           3,6,9
+#
+
+
+# component               allDays cycle_length_ub  cycle_length_lb cycle_length_unit timing_sequence
+Cytarabine                   1,2               1              1.0     indeterminate           1,4,7
+Dexamethasone                   1,2               1              1.0     indeterminate           1,4,7
+Mercaptopurine  15,16,17,18,19,20,21               1              1.0     indeterminate           2,5,8
+Vincristine                    15               1              1.0     indeterminate           2,5,8
+Cyclophosphamide                 29,30               1              1.0     indeterminate           3,6,9
+Etoposide                 29,30               1              1.0     indeterminate           3,6,9
+
+
+# Cycles (or courses) without enumerated values: These are quite common, for example, “One
+# course” is a frequently encountered cycleSIG. In this case, cycle_length_lb and cycle_length_ub
+# are both assigned the value of “1” and cycle_length_unit is assigned the value of
+# “indeterminate”.
+
+# no of cycles = 9
+# but the cycle length is not defined... so Nothing to do except to take last allDays as cycle length.
+
+# if (cycle_length_ub  cycle_length_lb cycle_length_unit) ~ this category
+# group_by(['timing_sequence'])
+# cycle_length = allDays_field:list.max() e.g. 21 for 2,5,8 group
+# DEFAULT_PROC
+
+
+# Case 2
+sample_df[['component','allDays','cycle_length_ub','cycle_length_lb','cycle_length_unit','timing_sequence', 'cyclesigs']]
+             component              allDays cycle_length_ub  cycle_length_lb cycle_length_unit timing_sequence                         cyclesigs
+995   Cyclophosphamide                1,2,3              35             21.0               day         1,3,5,7  21- to 35-day cycle for 4 cycles
+996      Dexamethasone  1,2,3,4,15,16,17,18              35             21.0               day         1,3,5,7  21- to 35-day cycle for 4 cycles
+997        Doxorubicin                    4              35             21.0               day         1,3,5,7  21- to 35-day cycle for 4 cycles
+998        Vincristine               1,8,15              35             21.0               day         1,3,5,7  21- to 35-day cycle for 4 cycles
+999         Cytarabine                  2,3              35             21.0               day         2,4,6,8  21- to 35-day cycle for 4 cycles
+1000      Methotrexate                    1              35             21.0               day         2,4,6,8  21- to 35-day cycle for 4 cycles
+
+
+split per cycle_length_ub and cycle_length_lb -> 2 different variants downstreamprocess each into individual matrix 
+# in non-greedy case scenario we would take the whole range [21-35] or implement handling of such case in the algorithm
+# This migth be a reason not to use exact algorithms for this problems.
+
+(added by design)
+Potential Issue no 1: any records with UB limit > allDays.max() 
+    0 0  both for ub and lb
+
+# DEFAULT_PROC
+timing_sequence:collect().max() e.g.8 
+
+vector 1x168
+                1   2  3  4  5  6  7  8
+                21 21 21 21 21 21 21 21 
+                |||||||||||||||||||||||
+component_A     111 000 111 000 1110000
+
+final matrix shape : 6x168 (sum of vectors)
+                1   2  3  4  5  6  7  8
+                21 21 21 21 21 21 21 21 
+                |||||||||||||||||||||||
+component_A    01011010101011101010101
+component_A    10010010101011101010101
+
+gap encoding of binary row data
+or rule-based projection
+
+6x168 1D-string-like vector , called regString
+== regString
+
+
+
+
+// DEVNOTES
+
+### misc- group checking to implement...
+[k for k, v in gg.items()
+if v.shape[0] > 5
+and (~v["timing_sequence"].astype(str).str.startswith("1")).any()
+and (v["cycle_length_unit"] != "indeterminate").any()]
+
+len([k for k, v in gg.items()
+if v.shape[0] > 5
+and (~v["timing_sequence"].astype(str).str.startswith("1")).any()
+and (v["cycle_length_unit"] != "indeterminate").any()
+and any(
+pd.to_numeric(v["cycle_length_ub"], errors="coerce") <
+v["allDays"].apply(lambda x: max(map(int, x)) if isinstance(x, list) and x else -1)
+)])
+
+
+### how many per cycle_length_unit?
+    indeterminate 1571   // special group cycle lengths need to be estimated. (1,1)
+    day 24342
+    month 499
+    week 2428
+
+
+
+### SIG instructions debunked
+"""
+// functinality SIG Instruction doc
+fields (datatypes) with multiple values
+timing_sequence (string)
+allDays  (string)
+seq.rel.when (string)
+
+
+regimen -> variant > <portion?> -> components/cui -> step_number
+step is repeated once or more -> sig anatomy 
+(cycle_length_lb, cycle_length_ub, cycle_length_unit, timing_sequence) ->
+allDays [-> freq/cui -> 
+
+
+component_role         component
+---------------------------------
+locoregional           24
+primary systemic      456
+secondary systemic    133
+
+
+class                       component
+-------------------------------------
+IV continuous canonical Sig       22
+IV intermittent canonical Sig    210
+Non-IV canonical Sig             320
+Non-canonical Sig                233
+Rad Sig                            7
+
+------------------------ Sigs Anatomy
+{
+Sigs types:
+    non-repeating ~ course : can have No Upper Bound (NUB) - indefinite
+    repeating ~ cyclic : definite
+}
+* Cycles (or courses) without enumerated values, “One course” is a frequently encountered cycleSIG. 
+cycle_length_lb, cycle_length_ub = 1, cycle_length_unit = “indeterminate”
+* conditional length = “Continued until CR or 60 days”, which means that the
+medication is continued until complete remission and/or 60 days have elapsed.
+* for convenience in modeling : Indefinite courses (e.g., a drug taken once per day and continued indefinitely) are
+transformed into 28-day cycles
+* 12-month courses are transformed into 28-day cycle x 13 cycles
+* 2-year courses are transformed into 28-day cycle x 26 cycles
+* 3-year courses are transformed into 28-day cycle x 39 cycles
+* and so forth for 4-year, 5-year, and so on...
+
+
+The timing sequence variable specifies the exact cycles in which a given component 
+of a regimen is delivered 
+------------------------
+timing_sequence: timing for course and cycle, specified by exact cycle
+timing_sequence = 1 // course, drug taken once
+timing_sequence > 1 // sequential courses 
+timing_sequence = [\d,\d,\d] // cycles of a regimen // Standard form for repeating (cyclic) regimen
+timing_sequence = 0 // pre-phase treatment
+timing_sequence = \d,\d,(\d) // a must (optional) // has specified end
+timing_sequence = \d,\d,(+n) // a must (optional) // does not have specified end
+timing_sequence = 1,(+1) // same as +n
+timing_sequence = 1,(+2) // means 1, 3, 5  // skips until indefinite !
+// As of May 19, 2025 there are 4208/23832 (18%) rows with the (+1) notation, and 15/23832 (0.06%) with the (+2) notation.
+                                    0/  #2024 version...                       15/23551
+                                    
+timing_sequence = \d, (+c) // until conditional criterion descirbed currently in cyclesigs_notes is met
+
+allDays
+----------
+Negative days are padded with a caret
+Optional days are enumerated with parentheses, e.g., “1,3,(5)”
+Indefinite optional extensions are represented by “(+n)”
+Conditional endings are represented by “(+c)”; - difficult to model -uncommon
+
+"""
+
+
+pre_run  cleanings
+"""DEV NOTES - WIP
+        # NOTE : Step clean of unortodox no 1
+        # Problem No1 : many variant CUIs is None? -- Unable to process
+        # shape(4962, 3)
+        #  df[df.variant_cui.isna()][['component','regimen_cui','variant','variant_cui']]
+        #                                 component     regimen_cui                        variant  variant_cui
+        # 11                             Acetaminophen        19847  N/A - secondary systemic drug          NaN
+        # 12                           Diphenhydramine        19847  N/A - secondary systemic drug          NaN
+        # 32     Granulocyte colony-stimulating factor          814  N/A - secondary systemic drug          NaN
+        # 72                               Hydroxyurea         1889  N/A - secondary systemic drug          NaN
+        # 108                       Methylprednisolone         1974  N/A - secondary systemic drug          NaN
+        # ...                                      ...          ...                            ...          ...
+        # 23509                             Filgrastim         4287  N/A - secondary systemic drug          NaN
+        # 23510          Trimethoprim-Sulfamethoxazole         4287  N/A - secondary systemic drug          NaN
+        # 23511                           Valacyclovir         4287  N/A - secondary systemic drug          NaN
+        # 23546                        Zoledronic acid        26982  N/A - secondary systemic drug          NaN
+        # 23547                        Zoledronic acid        26982  N/A - secondary systemic drug          NaN
+        
+        # NotNA
+        # df_drop_var.shape
+        # (18589, 49)
+
+        # NOTE: Still duplicate components per variant! - no 2 and 3
+        # sample_df = df[df.groupby(["regimen_cui", "variant_cui"])['component'].transform(lambda x: x.duplicated().any())]
+        #         for i,g in sample_df.groupby(['regimen_cui','variant_cui']):
+        # ...     print(i)
+        # ...     print(g.component)
+        # ...     break
+        # ... 
+        # (797, 131334.0)
+        # 9145    Cyclophosphamide
+        # 9146          Prednisone
+        # 9147          Prednisone
+
+# index different fileds:
+#        group = sample_df.loc[(9146, 9147), :]
+#            study                          regimen  regimen_cui phase  ...      variant variant_cui  temp  date_added
+# 9146  ECOG E5998  Cyclophosphamide and Prednisone          797   NaN  ...  Variant #01    131334.0   NaN  2023-09-19
+# 9147  ECOG E5998  Cyclophosphamide and Prednisone          797   NaN  ...  Variant #01    131334.0   NaN  2023-09-19
+
+        # >>> (group.loc[9146] != group.loc[9147]).index[group.loc[9146] != group.loc[9147]].tolist()
+        # ['phase', 'timing', 'branch_type', 
+        # 'cyclesigs_note', 
+        # 'step_number', 'class', 'doseMinNum', 'doseMaxNum', 'doseUnit', 'doseUnit_cui', 
+        # 'doseCapNum', 'doseCapUnit', 'doseCapUnit_cui', 'allDays', 'durationMinNum', 
+        # 'durationMaxNum', 'durationUnit', 'durationUnit_cui', 'frequency', 
+        # 'frequency_cui', 'inParens', 'sequence', 'seq.rel.when', 
+        # 'seq.rel.when.unit', 'seq.rel', 'seq.rel.what', 'tail', 'temp']
+
+        # group['allDays'] 
+        # 9146    1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,1...
+        #9147                                                  NaN <<---- will not work
+        # NOTE: FOR NOW: Drop allDays.Nan
+
+        # NOTE: Clean allDays <== None because we cannot create a string 
+        # new shape (7015!)
+
+        # Cases reported:
+        # ETL_HemOnc_regimens/.backup/sigs_variant_duplicate_components_differences_output.txt
+        # TODO: ether to be merged OR skiped for now. < handle later
+        # FOR NOW - SKIP
+
+        # TODO: code to deduplciate to clean!
+#       
+# 
+"""

@@ -30,6 +30,9 @@ fi
 mkdir -p "$WORKDIR"
 
 # --- Paths ---
+# HEMONC_VERSION='2024-12-18\nSource:\nJeremy Warner MD, MS, 2021, \n"HemOnc knowledgebase", \nhttps://doi.org/10.7910/DVN/FPO4HB, Harvard Dataverse, V45, UNF:6:hDCRZx6AGBRIU68MJeG21Q== [fileUNF]'
+HEMONC_VERSION='2025-03-15\nSource:\nJeremy Warner MD, MS, 2021, \n"HemOnc knowledgebase", \nhttps://doi.org/10.7910/DVN/FPO4HB, Harvard Dataverse, V45, UNF:6:hDCRZx6AGBRIU68MJeG21Q== [fileUNF]'
+SIGS_FILE="sigs_2025.csv"
 FILES_ROOT="INPUT_FILES_HEMONC"
 REF_DIR="OTHER_REF"
 REF_RGROUPS="${REF_DIR}/rgroups_template.tsv"
@@ -40,23 +43,45 @@ REGIMEN_TSV_FULL="${WORKDIR}/regimens_full.tsv"
 NLTK_DATA_DIR="nltk_data"
 LOGS="${WORKDIR}/logs"
 
-echo -e "\n%%% Starting Configuration and Pre-process... %%%\n"
+echo -e "\n%%% Starting ETL... %%%\n"
+echo -e "%%%\n\nHemOnc Version:\n ${HEMONC_VERSION} \n\n%%%"
+echo -e "\n%%% Running Queries... %%%\n"
+python3 - <<EOF
+import sys
+import os
+from dotenv import load_dotenv
+load_dotenv(dotenv_path=os.path.join(os.getcwd(), '.env'))
+sys.path.insert(0, "${SRC_DIR}")
+from vocab_query import main
+if __name__ == "__main__":
+    credentials = {
+      "username":os.getenv('USERNAME'),
+      "password":os.getenv('PASSWORD'),
+      "host":os.getenv('HOST'),
+      "port":os.getenv('PORT'),
+      "db":os.getenv('DB')
+    }
+    main(credentials, "${FILES_ROOT}/${SIGS_FILE}", "${WORKDIR}/concept_conditions.csv", "${WORKDIR}/sigs_w_conditions.csv", "${LOGS}")
+EOF
+
+
+echo -e "\n%%% Pre-processing... %%%\n"
 python3 - <<EOF
 import sys
 sys.path.insert(0, "${SRC_DIR}")
 from pre_run import pre_run
 if __name__ == "__main__":
-    pre_run("${FILES_ROOT}", "${WORKDIR}", "${NLTK_DATA_DIR}", "${LOGS}")
+    pre_run("${WORKDIR}/sigs_w_conditions.csv", "${WORKDIR}", "${LOGS}")
 EOF
 
-echo -e "\n%%% Running ETL... %%%\n"
+echo -e "\n%%% Processing SIGs... %%%\n"
 python3 - <<EOF
 import sys
 sys.path.insert(0, "${SRC_DIR}")
-from etl_main import ETL  
+from transform_main import Transform  
 if __name__ == "__main__":
-    etl = ETL()
-    etl.run("${REGIMEN_TSV}", "${SUPP_FILE}")
+    transform = Transform()
+    transform.run("${REGIMEN_TSV}", "${SUPP_FILE}", "${LOGS}")
 EOF
 
 echo -e "\n%%% Generating updated regimen groups and valid drugs... %%%\n"

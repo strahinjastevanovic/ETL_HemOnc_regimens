@@ -115,3 +115,6 @@ xz-gpl-tools
 xz-tools
 zlib
 zstd
+python-dotenv
+sqlalchemy
+psycopg2

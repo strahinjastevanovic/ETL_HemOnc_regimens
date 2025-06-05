@@ -23,7 +23,6 @@ def process_all(file_dir):
     # OLD DATASETS SIGS only 2021
     df_old = pd.read_csv(f"{curr_dir}/OTHER_REF/regimens_init.tsv", sep='\t')
     df=pd.read_csv(file_target, sep='\t')
-    dm=pd.read_csv(f"{curr_dir}/{file_dir}/merged.tsv", sep='\t')
     regname_new = set(df['regName'].unique())
     regname_old = set(df_old['regName'].unique())
     regname_new_mapping={}
@@ -137,14 +136,14 @@ def process_all(file_dir):
     new_shared_mapping = {k:V for k, V in regname_new_mapping.items() if k in shared}
     old__shared_mapping = {k:V for k, V in regname_old_mapping.items() if k in shared}
 
-    dm_shared = dm[dm.regimen.isin(new_shared_mapping.values())] # since new regimen derived from dm, should match
+    df_shared = df[df.regName.isin(new_shared_mapping.values())] 
 
 
-    return dm_shared, df, new_shared_mapping, df_old, old__shared_mapping
+    return df_shared, df, new_shared_mapping, df_old, old__shared_mapping
 
 
 
-def markdown_table(file_path, dm_shared, df, new_shared_mapping, df_old, old__shared_mapping):
+def markdown_table(file_path, df_shared, df, new_shared_mapping, df_old, old__shared_mapping):
     output_buffer = io.StringIO()
     correct_count = 0
     warning_count = 0
@@ -153,7 +152,7 @@ def markdown_table(file_path, dm_shared, df, new_shared_mapping, df_old, old__sh
 
     sections = []  # (priority, regimen, block)
 
-    for i, group in dm_shared.groupby("regimen"):
+    for i, group in df_shared.groupby("regName"):
         ss_new = df[df.regName == i].shortString.unique().tolist()
         _shared_value = reverse_new_shared_mapping[i]
         _old_value = old__shared_mapping[_shared_value]
@@ -188,25 +187,17 @@ def markdown_table(file_path, dm_shared, df, new_shared_mapping, df_old, old__sh
             block.write(f"{e} {ss}\n")
 
         block.write("\n")
-        block.write("regimen_cui | component | cyclesigs | HVC (with) | variant | allDays | condition\n")
+        block.write("regimen_cui | component | variant | condition\n")
         block.write("=" * 80 + "\n")
 
-        dedup_cols = ["regimen_cui", "component", "cyclesigs", "variant", "allDays", "condition"]
-        group['with'] = group['with'].astype(object)
-        group_sorted = (
-            group
-            .sort_values(["with"], ascending=False, na_position='last')
-            .drop_duplicates(subset=dedup_cols, keep='first')
-            .sort_values("variant", kind="stable")
-        )
-
+       
         last_variant = None
-        for _, row in group_sorted.iterrows():
+        for _, row in group.iterrows():
             if row['variant'] != last_variant:
                 if last_variant is not None:
                     block.write("-" * 80 + "\n")
                 last_variant = row['variant']
-            block.write(f"{int(row['regimen_cui'])} | {row['component']} | {row['cyclesigs']} | {row['with']} | {row['variant']} | {row['allDays']} | {row['condition']}\n")
+            block.write(f"{int(row['regCode'])} | {row['component']} | {row['variant']} | {row['condition']}\n")
 
         block.write("\n")
         sections.append((priority, i, block.getvalue()))
@@ -230,6 +221,6 @@ def markdown_table(file_path, dm_shared, df, new_shared_mapping, df_old, old__sh
         f.write(output_buffer.getvalue())
 
 
-dm_shared, df, new_shared_mapping, df_old, old__shared_mapping = process_all(file_dir)
-markdown_table(out + "/" + out_file, dm_shared, df, new_shared_mapping, df_old, old__shared_mapping)
+df_shared, df, new_shared_mapping, df_old, old__shared_mapping = process_all(file_dir)
+markdown_table(out + "/" + out_file, df_shared, df, new_shared_mapping, df_old, old__shared_mapping)
 

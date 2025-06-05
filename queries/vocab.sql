@@ -87,9 +87,10 @@ where c1.vocabulary_id = 'HemOnc'
 
 
 -- UPDATE - ANNOT.
-SELECT COUNT(*) AS total_unique_pairs
-FROM ( 
+-- SELECT COUNT(*) AS total_unique_pairs
+-- FROM ( 
 SELECT DISTINCT ON (c1.concept_id, c2.concept_id)
+-- SELECT 
   c1.concept_id           as c1_id, -- regimen_cui in sigs
   c1.concept_name         as c1_name, -- regimen in sigs
   c1.domain_id            as c1_domain, 
@@ -112,7 +113,8 @@ where c1.vocabulary_id = 'HemOnc'
     and
     (c1.domain_id = 'Regimen' or c1.concept_class_id = 'Regimen')
   )
-)
+-- )
+
 
 
 

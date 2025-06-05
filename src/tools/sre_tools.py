@@ -1,108 +1,129 @@
 import re 
-from collections import defaultdict
+from typing import List, Tuple, Set, Dict
 import numpy as np
 
 def extract_number_deprecated(text):
     return int(re.search(r"\d+", str(text)).group()) if re.search(r"\d+", str(text)) else 0
 
-import re
 
-def extract_number(text):
+def convert_to_days(num:float, unit:str, days_range:list=[1,2]):
     """
-    Extracts the numeric interval (in days) and its unit from strings like:
-    - '21-day cycle'
-    - '21- to 28-day cycle'
-    - '3-week schedule'
-
-    Returns:
-        (int days, str original_unit) or (None, str original_text) if unparseable
+    convert input unit to days
     """
-    text = str(text).lower().strip()
+    num = float(num)
+    if 'day' in unit:
+        days = num
+    elif 'week' in unit:
+        days = num * 7
+    elif 'month' in unit:
+        days = num * 30
+    elif 'year' in unit:
+        days = num * 365
+    elif 'indeterminate' in unit:
+        days = max([int(i) for i in days_range.split(",")])
+    else:
+        return f"[WARN] Unhandled case - cycle_length: {num} - unit: {unit}"
 
-    # Match either "21-day", or "21- to 28-day"
-    match = re.search(r"(\d+)\s*-\s*(?:to\s*)?(\d+)?-?\s*([a-z]+)", text)
-    if match:
-        num = int(match.group(1))
-        unit = match.group(3)
+    return int(days)
 
-        if 'day' in unit:
-            days = num
-        elif 'week' in unit:
-            days = num * 7
-        elif 'month' in unit:
-            days = num * 30
-        elif 'year' in unit:
-            days = num * 365
-        else:
-            return None, text  # Unknown unit
-
-        return (days, unit)
-
-    # Fallback: just 21 day in case 21- to 28-day ...
-    match = re.search(r"(\d+)\s*([a-z]+)", text)
-    if match:
-        num = int(match.group(1))
-        unit = match.group(2)
-
-        if 'day' in unit:
-            days = num
-        elif 'week' in unit:
-            days = num * 7
-        elif 'month' in unit:
-            days = num * 30
-        elif 'year' in unit:
-            days = num * 365
-        else:
-            return None, text
-
-        return (days, unit)
-
-    return None, text  # Still unparseable
-
-
+def get_last_cycle(unique_list):
+    return max([int(e) for e in [l for subli in [s.split(",") for s in unique_list] for l in subli]])
 
 def get_idays(text):
     return list(map(int, re.findall(r"-?\d+", text))) if re.findall(r"-?\d+", text) else 0
 
-def build_component_vector(idays: list, component: str, csig=0, debug=False) -> dict:
+# VECTOR
+
+def build_component_vector(idays: list, csig=0) -> dict:
     """
-    Build a binary vector for a component based on active days (idays).
+    Build a binary vector for a component based on integer days (idays).
     
     If csig == 0, infer vector length from day range.
     If csig > 0, build vector of length csig using idays positions.
 
-    Returns:
-        dict: {
-            <component>: [0, 1, 0, ...],
-            "tracker": {...}  # Only if debug=True
-        }
+    output: list = 0, 1, 0, ...]
     """
-    output = {}
-    tracker = {}
 
-    if debug:
-        tracker["received"] = {"idays": idays, "component": component, "csig": csig}
+    if type(csig) != int:
+        return ValueError(f"[ERR] unhandled csig: {csig}")
+   
+    vec = np.sum([np.eye(1, csig, k=day - 1)[0] for day in idays], axis=0)
+    return vec.astype(int)
 
-    try:
-        if not csig:
-            min_day = min(idays)
-            max_day = max(idays)
-            full_range = np.arange(min_day, max_day + 1)
-            offset_idays = [day - min_day for day in idays]
-            vec = np.sum([np.eye(1, len(full_range), k=idx)[0] for idx in offset_idays], axis=0)
-            output[component] = list(vec.astype(int))
-            if debug:
-                tracker["range"] = list(full_range)
-        else:
-            vec = np.sum([np.eye(1, csig, k=day - 1)[0] for day in idays], axis=0)
-            output[component] = list(vec.astype(int))
-    except Exception as e:
-        if debug:
-            tracker["error"] = str(e)
-            tracker["Failed"] = 1
+# MATRIX
 
-    return {**output, **({"tracker": tracker} if debug else {})}
+def get_variant_variant(
+    variants: List[Tuple[str, np.ndarray]],
+    i: int
+) -> Tuple[Set[int], np.ndarray]:
+    if i < len(variants):
+        pos_str, vec = variants[i]
+    else:
+        pos_str, base_vec = variants[0] if variants else ("", np.array([0]))
+        vec = np.zeros_like(base_vec)
+    pos_set = set(map(int, pos_str.split(','))) if pos_str else set()
+    return pos_set, vec
 
+def build_key_output(
+    variants: List[Tuple[str, np.ndarray]],
+    i: int,
+    sorted_positions: List[int],
+    position_to_len: Dict[int, int]
+) -> np.ndarray:
+    pos_set, vec = get_variant_variant(variants, i)
+    return np.concatenate([
+        np.pad(vec, (0, position_to_len[pos] - vec.shape[0])) if pos in pos_set
+        else np.zeros(position_to_len[pos], dtype=vec.dtype)
+        for pos in sorted_positions
+    ])
+
+# def extract_position_lengths(
+#     input_dict: Dict[str, List[Tuple[str, np.ndarray]]]
+# ) -> Tuple[List[int], Dict[int, int]]:
+#     position_to_len = {}
+#     for variants in input_dict.values():
+#         for pos_str, vec in variants:
+#             for pos in map(int, pos_str.split(',')):
+#                 position_to_len[pos] = max(position_to_len.get(pos, 0), vec.shape[0])
+#     return sorted(position_to_len), position_to_len
+
+def extract_position_lengths(
+    input_dict: Dict[str, List[Tuple[str, np.ndarray]]],
+    max_day_limit: int = 10000
+) -> Tuple[bool, Tuple[List[int], Dict[int, int]]]:
+    """Safely extract max vector length per position, with blockers on insane inputs."""
+    position_to_len = {}
+
+    for key, variants in input_dict.items():
+        for idx, (pos_str, vec) in enumerate(variants):
+            try:
+                positions = list(map(int, pos_str.split(',')))
+            except Exception as e:
+                return False, (f"Invalid position string in key={key}, index={idx}: '{pos_str}' — {e}", {})
+
+            for pos in positions:
+                if pos > max_day_limit:
+                    return False, (f"Position {pos} in key={key}, index={idx} exceeds max limit {max_day_limit}", {})
+                vec_len = vec.shape[0]
+                if vec_len > max_day_limit:
+                    return False, (f"Vector length {vec_len} in key={key}, index={idx} exceeds max limit {max_day_limit}", {})
+                position_to_len[pos] = max(position_to_len.get(pos, 0), vec_len)
+
+    return True, (sorted(position_to_len), position_to_len)
+
+def build_variant_outputs_numpy(
+    input_dict: Dict[str, List[Tuple[str, np.ndarray]]]
+) -> List[Dict[str, np.ndarray]]:
+    sorted_positions, position_to_len = extract_position_lengths(input_dict)
+    max_depth = max((len(v) for v in input_dict.values()), default=1)
+
+    return [
+        {
+            key: build_key_output(variants, i, sorted_positions, position_to_len)
+            for key, variants in input_dict.items()
+        }
+        for i in range(max_depth)
+    ]
 
 
 def collapse_event_matrix(event_string):
@@ -133,7 +154,7 @@ def collapse_event_matrix(event_string):
         return ""
 
     last_day = tag_entries[-1][0]
-    shift = num_days - last_day  # Same logic as before
+    shift = num_days - last_day  
 
     output = []
     used_shift = False
@@ -165,27 +186,59 @@ def collapse_event_matrix(event_string):
 
     return ";".join(output)
 
-def collapse_event_matrix_wrapper(event_string):
-    # Remove zero-only components
-    filtered = {k: v for k, v in event_string.items() if any(val != 0 for val in v)}
-    if not filtered:
-        return [""], {}
+
+def validate_and_split_variants(input_dict: Dict[str, List[Tuple[str, np.ndarray]]]) -> List[Dict[str, Tuple[str, np.ndarray]]] | str:
+    lengths = {k: len(v) for k, v in input_dict.items()}
+    unique_lengths = set(lengths.values())
+
+    if len(unique_lengths) == 1:
+        # Case 1: All keys same length
+        n = next(iter(unique_lengths))
+        return [
+            {k: input_dict[k][i] for k in input_dict}
+            for i in range(n)
+        ]
+
+    if len(unique_lengths) == 2 and 1 in unique_lengths:
+        # Case 2: One key has >1, rest have 1
+        long_key = max(lengths, key=lengths.get)
+        if all(l == 1 or k == long_key for k, l in lengths.items()):
+            n = lengths[long_key]
+            return [
+                {
+                    k: input_dict[k][i] if k == long_key else input_dict[k][0]
+                    for k in input_dict
+                }
+                for i in range(n)
+            ]
+        else:
+            raise ValueError("Variant lengths mismatch: mixed variant pattern is invalid.")
+
+    # Fallback for all other unexpected combinations
+    return None
+
+
+def pad_variant_dict(variant: Dict[str, Tuple[str, np.ndarray]]) -> Dict[str, np.ndarray]:
+    max_len = max(vec.shape[0] for _, vec in variant.values())
+    return {
+        k: np.pad(vec, (0, max_len - vec.shape[0]))
+        for k, (_, vec) in variant.items()
+    }
+
+def collapse_event_matrix_wrapper(input_dict: Dict[str, List[Tuple[str, np.ndarray]]]) -> List[str]:
+    "Main api endpoint"
+    variant_dicts = validate_and_split_variants(input_dict)
 
     results = []
-    tracker = {}
+    for vdict in variant_dicts:
+        padded = pad_variant_dict(vdict)
+        if not any(np.any(v) for v in padded.values()):
+            # print(padded)
+            # print(vdict)
+            raise ValueError("All components in variant are zero-only.")
 
-    # Group components by exact sequence length
-    length_groups = defaultdict(dict)
-    for k, v in filtered.items():
-        length_groups[len(v)][k] = v
-
-    # Run collapse_event_matrix on each length group
-    for length, group in length_groups.items():
-        result = collapse_event_matrix(group)
-        results.append(result)
-        tracker[f"len_{length}"] = len(group)
-
-    return results, tracker
+        results.append(collapse_event_matrix(padded))
+    return results
 
 def run_test():
     examples = [
@@ -226,69 +279,66 @@ def run_test():
         rrr = collapse_event_matrix(example[0])
         assert rrr == example[1], f"not eq: \n{example[1]}\n{rrr}"
 
-    # case with uneven things...
-    event_string_example = {
-        'Cyclophosphamide': [1] + [0]*13,
-        'Trastuzumab': [1] + [0]*20,
-        'Epirubicin': [1] + [0]*13,
-        'Paclitaxel': [1] + [0]*6 + [1] + [0]*3 + [1] + [0]*9,
-        'Pertuzumab': [1] + [0]*20
+   
+    esv1 = {  # case from indeterminate
+        'Cy': [("1", [1] + [0]*2)],
+        'Ep': [("1", [1] + [0]*2)],
     }
+    esv1 = {k : [(v[0][0], np.array(v[0][1]))] for k,v in esv1.items()}
+    esv2 = {  # case from indeterminate + edge case if same cycle need padding
+        'Cy': [("1", [1] + [0]*2)],
+        'Ep': [("1", [1] + [0]*2)],
+        'Eb': [("1", [1] + [0]*6 + [1] + [0]*3 + [1] + [0]*2)],
+    }
+    esv2 = {k : [(v[0][0], np.array(v[0][1]))] for k,v in esv2.items()}
+    esv3 = { # case with different cycles
+        'Cy': [("1,3,4", [1] + [0]*5)],
+        'Ep': [("2,5", [1] + [0]*6)],
+    }
+    esv3 = {k : [(v[0][0], np.array(v[0][1]))] for k,v in esv3.items()}
+    esv4 = { # case with same cycles multiple groups
+        'Cy': [("1,3,4", [1] + [0]*5)],
+        'Ep': [("2,5", [1] + [0]*6)],
+        'Eb': [("2,5", [1] + [0]*6)],
+
+    }
+    esv4 = {k : [(v[0][0], np.array(v[0][1]))] for k,v in esv4.items()}
+
+    esv5 = { # case with ub,lb + conditional missing ub in one
+        'Cy': [("1,3,4", np.array([1] + [0]*4)), ("1,3,4", np.array([1]+[0]*9))],
+        'Ep': [("2,5", np.array([1] + [0]*2 + [1]*2)), ], 
+    }
+
+    esv6 = { 
+        'Cy': [("1,3,4", [1] + [0]*5)],
+        'Ep': [("2,5", [1] + [0]*5)],
+    }
+    esv6 = {k : [(v[0][0], np.array(v[0][1]))] for k,v in esv3.items()}
     # print(event_string_example)
-    res = collapse_event_matrix_wrapper(event_string_example)
+    esv_expected = [
+       '3.Cy;0.Ep', 
+       '3.Cy;0.Eb;0.Ep;7.Eb;4.Eb', 
+       '7.Cy;0.Ep', 
+       '7.Cy;0.Eb;0.Ep', 
+       '1.Cy;0.Ep;3.Ep;1.Ep', 
+       '6.Cy;0.Ep;3.Ep;1.Ep', 
+       '7.Cy;0.Ep'
 
-    # print("Expected:\n")
-    # Expected combinations in list:
-    expected_not = [ 
-    "10.Paclitaxel;0.Pertuzumab;0.Trastuzumab;7.Paclitaxel;4.Paclitaxel",
-    "14.Cyclophosphamide;0.Epirubicin",
-    "10.Cyclophosphamide;0.Epirubicin;0.Paclitaxel;0.Pertuzumab;0.Trastuzumab;7.Paclitaxel;4.Paclitaxel",
-    "3.Cyclophosphamide;0.Epirubicin;0.Paclitaxel;0.Pertuzumab;0.Trastuzumab;7.Paclitaxel;4.Paclitaxel"
-    ] 
-    expected = [ 
-    "10.Paclitaxel;0.Pertuzumab;0.Trastuzumab;7.Paclitaxel;4.Paclitaxel",
-    "14.Cyclophosphamide;0.Epirubicin",
-    ] 
+    ]
+    ress = []
+    for x in [esv1,esv2, esv3,esv4,esv5,esv6]:
+        ress.extend(collapse_event_matrix_wrapper(x))
 
-    assert sorted(res[0]) == sorted(expected), f"Failed.\nobtained={res[0]}\nexpected={expected}"
-    assert sorted(res[0]) != sorted(expected_not), f"Failed.\nobtained={res[0]}\nexpected={expected}"
+    assert ress == esv_expected, f"No match!\nActual:   {ress}\nExpected: {esv_expected}"
+    
+
+    case_1 = {'Cytarabine': [('1,2,3,4', np.array([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])), ('1,2,3,4', np.array([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]))], 'Mitoxantrone': [('1,2,3,4', np.array([1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])), ('1,2,3,4', np.array([1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]))]}
+    # print(case_1)
+    # print(f"{build_variant_outputs_numpy(case_1)=}")
+    # print(f"{collapse_event_matrix_wrapper(case_1)=}")
 
     print("All tests passed!")
 
 
-def run_test_topup():
-    rows = [
-        {
-        "component" : "bendamustine",
-        "allDays": "1,2",
-        "cyclesigs":"28-day cycle for 6 cycles"
-        },
-        {
-        "component" : "bendamustine",
-        "allDays": "1,2",
-        "cyclesigs":"Full cycle"
-        },
-        {
-        "component" : "bendamustine",
-        "allDays": "None",
-        "cyclesigs":"28-day cycle"
-        }
-    ]
-
-    for row in rows:
-        drug = str(row["component"]).strip().replace(" ", "").lower().capitalize()
-        cycsigs_int = extract_number(row["cyclesigs"])
-
-        if row['allDays']:
-            idays = get_idays(row['allDays'])
-        else:
-            idays = [None]
-            
-        vector = build_component_vector(idays, drug, cycsigs_int)
-        print("Input row:", row)
-        print(vector)
-
-
 
 run_test()
-# run_test_topup()
