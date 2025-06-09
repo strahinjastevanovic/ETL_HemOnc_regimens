@@ -44,25 +44,25 @@ NLTK_DATA_DIR="nltk_data"
 LOGS="${WORKDIR}/logs"
 
 echo -e "\n%%% Starting ETL... %%%\n"
-echo -e "%%%\n\nHemOnc Version:\n ${HEMONC_VERSION} \n\n%%%"
-echo -e "\n%%% Running Queries... %%%\n"
-python3 - <<EOF
-import sys
-import os
-from dotenv import load_dotenv
-load_dotenv(dotenv_path=os.path.join(os.getcwd(), '.env'))
-sys.path.insert(0, "${SRC_DIR}")
-from vocab_query import main
-if __name__ == "__main__":
-    credentials = {
-      "username":os.getenv('USERNAME'),
-      "password":os.getenv('PASSWORD'),
-      "host":os.getenv('HOST'),
-      "port":os.getenv('PORT'),
-      "db":os.getenv('DB')
-    }
-    main(credentials, "${FILES_ROOT}/${SIGS_FILE}", "${WORKDIR}/concept_conditions.csv", "${WORKDIR}/sigs_w_conditions.csv", "${LOGS}")
-EOF
+# echo -e "%%%\n\nHemOnc Version:\n ${HEMONC_VERSION} \n\n%%%"
+# echo -e "\n%%% Running Queries... %%%\n"
+# python3 - <<EOF
+# import sys
+# import os
+# from dotenv import load_dotenv
+# load_dotenv(dotenv_path=os.path.join(os.getcwd(), '.env'))
+# sys.path.insert(0, "${SRC_DIR}")
+# from vocab_query import main
+# if __name__ == "__main__":
+#     credentials = {
+#       "username":os.getenv('USERNAME'),
+#       "password":os.getenv('PASSWORD'),
+#       "host":os.getenv('HOST'),
+#       "port":os.getenv('PORT'),
+#       "db":os.getenv('DB')
+#     }
+#     main(credentials, "${FILES_ROOT}/${SIGS_FILE}", "${WORKDIR}/concept_conditions.csv", "${WORKDIR}/sigs_w_conditions.csv", "${LOGS}")
+# EOF
 
 
 echo -e "\n%%% Pre-processing... %%%\n"
@@ -84,29 +84,29 @@ if __name__ == "__main__":
     transform.run("${REGIMEN_TSV}", "${SUPP_FILE}", "${LOGS}")
 EOF
 
-echo -e "\n%%% Generating updated regimen groups and valid drugs... %%%\n"
-python3 - <<EOF
-import sys
-sys.path.insert(0, "${SRC_DIR}")
-from other_ref import generate_reg_group, generate_valid_drugs 
-if __name__ == "__main__":
-    generate_reg_group("${REGIMEN_TSV_FULL}", "${REF_RGROUPS}", workdir="${WORKDIR}")
-    generate_valid_drugs("${REGIMEN_TSV_FULL}", "${REF_VALIDDRUGS}", workdir="${WORKDIR}")
-EOF
+# echo -e "\n%%% Generating updated regimen groups and valid drugs... %%%\n"
+# python3 - <<EOF
+# import sys
+# sys.path.insert(0, "${SRC_DIR}")
+# from other_ref import generate_reg_group, generate_valid_drugs 
+# if __name__ == "__main__":
+#     generate_reg_group("${REGIMEN_TSV_FULL}", "${REF_RGROUPS}", workdir="${WORKDIR}")
+#     generate_valid_drugs("${REGIMEN_TSV_FULL}", "${REF_VALIDDRUGS}", workdir="${WORKDIR}")
+# EOF
 
-echo -e "\n%%% Converting TSVs to RDA... %%%\n"
-Rscript - <<EOF
-regimens <- read.delim("${WORKDIR}/regimens.tsv", stringsAsFactors = FALSE)
-save(regimens, file = "${WORKDIR}/regimens.rda")
+# echo -e "\n%%% Converting TSVs to RDA... %%%\n"
+# Rscript - <<EOF
+# regimens <- read.delim("${WORKDIR}/regimens.tsv", stringsAsFactors = FALSE)
+# save(regimens, file = "${WORKDIR}/regimens.rda")
 
-validdrugs <- read.delim("${WORKDIR}/validdrugs.tsv", stringsAsFactors = FALSE)
-save(validdrugs, file = "${WORKDIR}/validdrugs.rda")
+# validdrugs <- read.delim("${WORKDIR}/validdrugs.tsv", stringsAsFactors = FALSE)
+# save(validdrugs, file = "${WORKDIR}/validdrugs.rda")
 
-regimengroups <- read.delim("${WORKDIR}/regimengroups.tsv", stringsAsFactors = FALSE)
-save(regimengroups, file = "${WORKDIR}/regimengroups.rda")
-EOF
+# regimengroups <- read.delim("${WORKDIR}/regimengroups.tsv", stringsAsFactors = FALSE)
+# save(regimengroups, file = "${WORKDIR}/regimengroups.rda")
+# EOF
 
-echo -e "\n%%% Writing Validation report... %%%\n"
-python3 "${SRC_DIR}/validation_check.py" "${WORKDIR}" "${REGIMEN_TSV_FULL}"
+# echo -e "\n%%% Writing Validation report... %%%\n"
+# python3 "${SRC_DIR}/validation_check.py" "${WORKDIR}" "${REGIMEN_TSV_FULL}"
 
 echo -e "\n%%% Done. Outputs saved in: $WORKDIR %%%\n"

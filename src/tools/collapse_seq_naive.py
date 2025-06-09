@@ -31,7 +31,7 @@ def collapse_naive(s):
     if len(collapsed) == 1:
         collapsed = collapsed * 2
 
-    return ";".join(collapsed) 
+    return ";".join(s) 
 
 
 def collapse(s: str) -> str:

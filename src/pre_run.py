@@ -3,19 +3,9 @@ import polars as pl
 import os 
 from tqdm import tqdm
 import json
-import re
+import functools
 
 # TODO: cleanify
-def setup_logging(log_dir):
-    os.makedirs(log_dir, exist_ok=True)
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.DEBUG)
-    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-    full_handler = logging.FileHandler(f"{log_dir}/PRE.processing.log", mode='w')
-    full_handler.setFormatter(formatter)
-    logger.addHandler(full_handler)
-    return logger
-
 # Analyze column types and dump schema summary
 def audit_column_types(file_path: str, log_path: str, schema_json_path: str, sample_rows: int = 10000, int_threshold: float = 0.8):
     df_sample = pl.read_csv(file_path, infer_schema_length=sample_rows)
@@ -53,14 +43,25 @@ def audit_column_types(file_path: str, log_path: str, schema_json_path: str, sam
 class Runner:
     def __init__(self, sigs_path, log_dir="."):
         self.sigs_path = sigs_path
-        self.logger = setup_logging(log_dir)
         self.schema_log_path = f"{log_dir}/PRE.types-audit.log"
         self.schema_json_path = f"{log_dir}/s_frame.schema.json"
+        
+        self.logger = self._setup_logging(log_dir)
         
         # Load data and process immediately upon instantiation
         audit_column_types(self.sigs_path, self.schema_log_path, self.schema_json_path)
         self._load_data()
         self._process_data()
+
+    def _setup_logging(self, log_dir):
+        os.makedirs(log_dir, exist_ok=True)
+        logger = logging.getLogger(__name__)
+        logger.setLevel(logging.DEBUG)
+        formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+        full_handler = logging.FileHandler(f"{log_dir}/PRE.processing.log", mode='w')
+        full_handler.setFormatter(formatter)
+        logger.addHandler(full_handler)
+        return logger
 
     def _load_data(self):
         """Load data with all columns forced to Utf8 to ensure resilience."""
@@ -74,146 +75,6 @@ class Runner:
         )
         self.logger.info("Data loaded with Utf8 schema.")
 
-    def clean_nan_columns(self, df, drop_na_cols=None):
-        """Clean NaN values in specified columns."""
-        assert drop_na_cols is not None
-        assert all(col in df.columns for col in drop_na_cols)
-
-        self.logger.info("---- CLEANING NAN RECORDS ----")
-
-        for col in drop_na_cols:
-            before = df.shape
-
-            # Group by variant keys to detect partial nulls
-            cols = ['regimen_cui', 'variant_cui', col] if col != "variant_cui" else ['regimen_cui', "variant_cui"]
-            group = df.select(cols)
-
-            # Count total rows and null rows per variant group
-            stats = (
-                group
-                .group_by(["regimen_cui", "variant_cui"])
-                .agg([
-                    pl.count().alias("total"),
-                    pl.col(col).is_null().sum().alias("null_count")
-                ])
-                .with_columns([
-                    (pl.col("null_count") > 0).alias("has_null"),
-                    (pl.col("null_count") < pl.col("total")).alias("has_non_null")
-                ])
-            )
-
-            # Detect cases where column is partially null (within group)
-            partial_drop = stats.filter(pl.col("has_null") & pl.col("has_non_null")).shape[0]
-            total_groups = stats.shape[0]
-
-            self.logger.warning(f"[CLEAN] Column '{col}': dropping rows from {partial_drop} partially-null variants (out of {total_groups} total variants).")
-
-            # Drop actual nulls
-            df = df.filter(pl.col(col).is_not_null())
-            after = df.shape
-            self.logger.info(f"[CLEAN] Dropped nulls in '{col}': {before} → {after}")
-            
-            print(f"[CLEAN] Dropped nulls in '{col}': {before} → {after}")
-
-        return df
-
-    def clean_group_duplicated_components_and_log(self, df):
-        df = df.with_row_count("row_idx")  # Add index for safe row deletion
-        rows_to_remove = []
-        # Iterate through groups of regimen_cui + variant_cui
-        for group_id, group_df in tqdm(df.group_by(['regimen_cui', 'variant_cui', 'condition_cui']), desc="Cleaning duplicate components"):
-            # Check for duplicates within the group by 'component'
-            regimen_cui, variant_cui, condition_cui = group_id
-            duplicate_mask = group_df.select('component').to_series().is_duplicated()
-            if not duplicate_mask.any():
-                continue
-
-            dups = group_df.filter(duplicate_mask)
-            for component, comp_df in dups.group_by('component'):
-                if comp_df.height <= 1:
-                    continue
-                
-                self.logger.info("---------------------------------------------------")
-                # change since 2024!!! multiple regimen names for the same reg_cui 
-                # self.logger.warning(f"Regimen: {group_df.select('regimen').unique().item()}. Variant: {group_df.select('variant').unique().item()}")
-                self.logger.warning(
-                    f"Regimen: {'|'.join(group_df.select('regimen').unique().to_series().to_list())}. "
-                    f"Variant: {'|'.join(group_df.select('variant').unique().to_series().to_list())}"
-                )
-                self.logger.warning(f"RegimenCUI: {regimen_cui}. VariantCUI: {variant_cui}. ConditionCUI: {condition_cui}")
-                self.logger.warning(f"Component: {component}. # Duplicates: {comp_df.shape[0]}")
-
-                base_row = comp_df[0]
-                for i in range(1, comp_df.height):
-                    diffs = []
-                    for col in comp_df.columns:
-                        if col == "row_idx":
-                            continue
-                        base_val = base_row[col].item()
-                        curr_val = comp_df[i][col].item()
-                        if base_val != curr_val:
-                            diffs.append((col, base_val, curr_val))
-
-                    for col, prev, curr in diffs:
-                        self.logger.warning(f"Duplicate_{i+1} different in '{col}': {prev} != {curr}")
-
-
-                # Track row indices to remove
-                rows_to_remove.extend(comp_df["row_idx"].to_list())
-
-        # Remove duplicated rows by index
-        df_cleaned = df.filter(~pl.col("row_idx").is_in(rows_to_remove)).drop("row_idx")
-        print(f"[CLEAN] Removed duplicated components (final shape): {df_cleaned.shape}")
-        return df_cleaned
-
-
-    def clean_sre_anatomy_records(self, df):
-        """Each is a sep case 
-        allDays 		    -\d, d1 | d2 , \d ~ \d  #TODO: (c+)...skipped/logged at the moment - uncommon
-        """
-        # timing_sequence	    (\d) (+) (c+)           # TODO: this will not work...
-
-        self.logger.info("---- CLEANING SRE ANATOMY RECORDS ----")
-
-        tracked_all_days_pattern = r"-\d+|\d+\|\d+|\d+~\d+|\(.*?\)"
-
-        # tracked_timing_sequence_pattern = r"\(.*?\)"
-
-        # find offending variant-level pairs instead
-        unhandled_pairs = (
-            df.filter(
-                pl.col("allDays").str.contains(tracked_all_days_pattern, literal=False)
-                # | pl.col("timing_sequence").str.contains(tracked_timing_sequence_pattern, literal=False)
-            )
-            .select("regimen_cui")
-            .unique()
-        )
-
-        self.logger.warning(f"Dropping unhandled regimen CUIs #: {unhandled_pairs.shape[0]}")
-
-        df_cleaned = df.join(unhandled_pairs, on=["regimen_cui"], how="anti")
-
-        unq_variants = (
-            df_cleaned
-            .group_by("regimen_cui")
-            .agg(pl.col("variant_cui").n_unique().alias("n_unique"))
-            .select(pl.col("n_unique").sum())
-        )
-        
-        self.logger.info(f"[CLEAN] No missing SRE anatomy records (final shape): {df_cleaned.shape}")
-        self.logger.info(f"[CLEAN] Total regimen variants: {unq_variants}")
-        return df_cleaned
-
-
-    def mock_nan_conditions(self, df: pl.DataFrame) -> pl.DataFrame:
-        return df.with_columns(
-            pl.when(pl.col("condition").is_null())
-            .then(pl.lit("condition*") + pl.col("regimen").cast(str))
-            .otherwise(pl.col("condition"))
-            .alias("condition")
-        )
-
-
     def _process_data(self):
         """Process the data (clean NaN and handle duplicates)."""
 
@@ -226,13 +87,286 @@ class Runner:
             "timing_sequence"
         ]
 
-        self.s = (
-            self.clean_nan_columns(self.s, sigs_anatomy_essentials)         # nan records for important fields droped
-                .pipe(self.clean_group_duplicated_components_and_log)       # multi-part sigs droped
-                .pipe(self.clean_sre_anatomy_records)                       # custom edge cases droped
-                .pipe(self.mock_nan_conditions)                             # mock conditions
+        group_keys=["condition_cui", "regimen_cui", "variant_cui"]
+        
+        self.s = self.s.drop_nulls(group_keys) # Clean NaNs from group keys - safe
+
+        self.log_regimen_level_stats()
+        self.log_cycle_length_unit(group_keys)
+        self.log_variants_level_stats(group_keys)
+
+
+        self.handle_processing(group_keys, sigs_anatomy_essentials)
+        
+        self.logger.info(f"Data pre-processed. Shape: {self.s.shape}")
+
+    def log_cycle_length_unit(self, group_keys=["condition_cui", "regimen_cui", "variant_cui"]):
+        """checks cycle_length for indeterminate"""
+
+        cycle_length_unit_indefinite = (
+            self.s
+            .group_by(group_keys)
+            .agg([
+                (pl.col("cycle_length_unit") == "indeterminate").any().alias("has_indeterminate")
+            ])
+            .filter(pl.col("has_indeterminate"))
+            .shape[0]
         )
-        self.logger.info(f"Data processed. Shape: {self.s.shape}")
+
+        cycle_length_unit_indefinite_regimens_unique = (
+             self.s
+            .filter(pl.col("cycle_length_unit") == "indeterminate")
+            .group_by("regimen_cui")
+            .agg([
+                pl.col("variant_cui").n_unique().alias("n_variant")
+            ])
+            .select(pl.col("n_variant").sum())
+            .item()
+        )
+
+        self.logger.info(f"[Lookup] cycle_length_unit / indeterminate variants: {cycle_length_unit_indefinite} ({cycle_length_unit_indefinite_regimens_unique} unique regimen variants)")
+
+    def log_regimen_level_stats(self):
+        """Note: Needs to be called early on"""
+
+        unique_regimens = (
+            self.s.select("regimen_cui").n_unique()
+        )
+
+        self.logger.info(f"[Lookup] Total regimens (unique): {unique_regimens}")
+
+
+        unique_regimens_per_conditions = (
+            self.s.group_by("condition_cui")
+            .agg(pl.col("regimen_cui").n_unique().alias("n_regimens"))
+            .select(pl.col("n_regimens")).sum()
+            .item()
+        )
+
+        self.logger.info(f"[Lookup] Total regimens per condition (unique): {unique_regimens_per_conditions}")
+    
+    def log_variants_level_stats(self,group_keys):
+        """"""
+        all_keys = self.s.select(group_keys).unique()
+
+        # Check for NaNs/nulls in any group key column
+        nan_group_keys = all_keys.filter(
+            pl.fold(
+                acc=pl.lit(False),
+                function=lambda acc, x: acc | x.is_null(),
+                exprs=[pl.col(c) for c in group_keys]
+            )
+        )
+
+        if nan_group_keys.height > 0:
+            self.logger.error(f"[GROUP_KEYS] Found {nan_group_keys.height} groups with NaNs:")
+            self.logger.debug(nan_group_keys)
+            raise ValueError("Invalid group_keys: NaNs present in condition/regimen/variant key set")
+
+        all_keys_regimens_unique = (
+            all_keys
+            .select(["regimen_cui", "variant_cui"])
+            .unique()
+            .group_by("regimen_cui")
+            .agg(pl.col("variant_cui").n_unique().alias("n_variant"))
+            .select(pl.col("n_variant").sum())
+            .item()
+        )
+
+        self.logger.info(f"[Lookup] Total variant: {all_keys.shape[0]} ({all_keys_regimens_unique} unique regimen variants)")
+
+        s_with_dup = self.s.with_columns([
+            pl.col("component")
+            .is_duplicated()
+            .over(group_keys)
+            .alias("is_duplicated")
+        ])
+
+        #
+        #   Multi-parted variants grouping
+        #
+        mask_renamed = (
+            s_with_dup           # Clean + duplicate tags
+            .group_by(group_keys)
+            .agg([
+                pl.col("is_duplicated").any().alias("is_multipart")
+            ]) # Creates struct data type, column w multi-fileds object
+            .with_columns(      # set value names
+            pl.when(pl.col("is_multipart"))
+            .then(pl.lit("Multi-part Sig")).otherwise(pl.lit("Single-part Sig"))
+            .alias("sig_type")
+            )
+        )
+        
+        multi_count = (
+            mask_renamed
+            .group_by("sig_type")
+            .agg(pl.count())  # This counts unique group_keys per sig_type (since mask already grouped by group_keys)
+            .filter(pl.col("sig_type") == "Multi-part Sig").select("count").item()
+        )
+
+        single_count = (
+            mask_renamed
+            .group_by("sig_type")
+            .agg(pl.count())  # This counts unique group_keys per sig_type (since mask already grouped by group_keys)
+            .filter(pl.col("sig_type") == "Single-part Sig").select("count").item()
+        )
+
+        regimen_variant_sums = (
+            mask_renamed
+            .group_by(["sig_type", "regimen_cui"])
+            .agg(pl.col("variant_cui").n_unique().alias("n_variants"))
+            .group_by("sig_type")
+            .agg(pl.col("n_variants").sum().alias("total_unique_variants"))
+        )
+
+        multi_variant_count = (
+            regimen_variant_sums
+            .filter(pl.col("sig_type") == "Multi-part Sig")
+            .select("total_unique_variants")
+            .item()
+        )
+
+        single_variant_count = (
+            regimen_variant_sums
+            .filter(pl.col("sig_type") == "Single-part Sig")
+            .select("total_unique_variants")
+            .item()
+        )
+
+        self.logger.info(f"[Lookup] Multi-part / Single-part variants: {multi_count} ({multi_variant_count} unique regimen variants) / {single_count} ({single_variant_count} unique regimen variants)")
+
+        assert single_variant_count + multi_variant_count == all_keys_regimens_unique
+
+    def handle_processing(self, group_keys, sigs_anatomy_essentials):
+        """
+            Find Multi-part sig group keys. Split Multi part and single part sigs.
+            Process single part as standard. Combine filtered single part and multi part as funny
+            Log stats for funny and standard regimnes.
+        """
+
+        all_keys = self.s.select(group_keys).unique()
+        
+        all_keys_regimens_unique = (
+            all_keys
+            .select(["regimen_cui", "variant_cui"])
+            .unique()
+            .group_by("regimen_cui")
+            .agg(pl.col("variant_cui").n_unique().alias("n_variant"))
+            .select(pl.col("n_variant").sum())
+            .item()
+        )
+
+        s_with_dup = self.s.with_columns([
+            pl.col("component")
+            .is_duplicated()
+            .over(group_keys)
+            .alias("is_duplicated")
+        ])
+
+        multipart_keys = (
+            s_with_dup           
+            .group_by(group_keys)
+            .agg([
+                pl.col("is_duplicated").any().alias("is_multipart")
+            ])
+            .filter(pl.col("is_multipart"))
+            .select(group_keys)
+        )
+        
+        multipart_df = self.s.join(multipart_keys, on=group_keys, how="inner")
+        
+        singlepart_keys = all_keys.join(
+            multipart_keys,
+            on=group_keys,
+            how="anti"
+        )
+
+        singlepart_df = self.s.join(
+            singlepart_keys,
+            on=group_keys,
+            how="inner"
+        )
+
+        ######################### Cleaning single-parted sigs ###################################
+        tracked_all_days_pattern = r"-\d+|\d+\|\d+|\d+~\d+|\(.*?\)"
+
+        # has Nans in non-nan mandatory fields
+        singlepart_df = singlepart_df.with_columns([
+            pl.fold(
+                acc=pl.lit(False),
+                function=lambda acc, x: acc | x.is_null(),
+                exprs=[pl.col(c) for c in sigs_anatomy_essentials],
+            ).alias("has_null_in_sig")
+        ])
+
+        valid_group_ids = (
+            singlepart_df
+            .group_by(*group_keys)
+            .agg([
+                
+                (~pl.col("has_null_in_sig")).all().alias("non_null_fields"),
+
+                ( # has unhandled pattern in allDays
+                    ~pl.col("allDays")
+                    .cast(pl.Utf8)
+                    .str.contains(tracked_all_days_pattern, literal=False)
+                ).all().alias("no_allDays_pattern"),
+
+            ])
+            .filter( 
+                pl.col("non_null_fields")
+                & pl.col("no_allDays_pattern")
+            )
+            .select(group_keys)
+        )
+
+        
+        # Valid groups output
+        self.s = singlepart_df.join(valid_group_ids, on=group_keys, how="inner").drop("has_null_in_sig")
+
+        # Double check the leaks...
+        leaks = self.s.filter(
+            pl.col("allDays").cast(pl.Utf8).str.contains(tracked_all_days_pattern, literal=False)
+        )
+
+        if leaks.height > 0:
+            self.logger.error(f"[LEAK] {leaks.height} rows still match invalid allDays pattern!")
+            # self.logger.debug(leaks.select(group_keys + ["allDays"]))
+            raise RuntimeError("Group filter failed — bad allDays pattern leaked post-filter.")
+        
+        ######################### Logging ###################################
+        standard = self.s.select(group_keys).unique()
+        funny_singlepart = singlepart_df.join(standard, on=group_keys, how='anti').drop("has_null_in_sig")
+        funny = pl.concat([funny_singlepart, multipart_df]) # defining filtered and multiparted sigs as funny
+        funny_unique = funny.select(group_keys).n_unique()
+
+        standard_regimens_unique = ( 
+            standard
+            .select(["regimen_cui", "variant_cui"])
+            .unique()  # filters duplicated reg - var
+            .group_by("regimen_cui")
+            .agg(pl.col("variant_cui").n_unique().alias("n_variant"))
+            .select(pl.col("n_variant").sum())
+            .item()
+        )
+
+        funny_regimens_unique = ( 
+            funny
+            .select(["regimen_cui", "variant_cui"])
+            .unique()
+            .group_by("regimen_cui")
+            .agg(pl.col("variant_cui").n_unique().alias("n_variant"))
+            .select(pl.col("n_variant").sum())
+            .item()
+        )
+
+        assert all_keys_regimens_unique == standard_regimens_unique + funny_regimens_unique, "Mismatch in group splits!"
+        
+        self.logger.info(f"[Lookup] Standrad variants: {standard.shape[0]} ({standard_regimens_unique} unique regimen variants)")
+        self.logger.info(f"[Lookup] Funny variants: {funny_unique} ({funny_regimens_unique} unique regimen variants)")
+
+       
 
 
 def pre_run(
@@ -249,8 +383,7 @@ def pre_run(
     )
     dp = r.s[:]
 
-    # dp.to_pandas().to_csv(f"{output_dir}/s_frame.tsv", sep="\t", index=False)
-    dp.write_parquet(f"{output_dir}/s_frame.parquet") # safeguarding mixed fields
+    dp.write_parquet(f"{output_dir}/s_frame.parquet") 
 
     print("[INFO] Output files written.")
 

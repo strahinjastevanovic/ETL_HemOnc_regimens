@@ -26,6 +26,45 @@ class Transform:
         full_handler.setFormatter(formatter)
         logger.addHandler(full_handler)
         return logger
+    
+    def log_reports_and_sumstats(self, frame):
+        self.logger.info(f"Final frame shape: {frame.shape}")
+        self.logger.info(f"Total number of conditions: {frame.condition.nunique()}")
+
+        reg_num =frame.regCode.nunique()
+        self.logger.info(f"Total number of regimens: {reg_num}")
+
+        reg_num_cond =frame.groupby('condition').regCode.nunique().sum()
+        self.logger.info(f"Total number of regimens per condition: {reg_num_cond}")
+        self.logger.info(f"#NOTE# {'Regimens repeat across conditions' if reg_num_cond > reg_num else 'regimens does not repeat across conditions'}")
+
+        unq_var = frame.groupby(['condition','regCode']).variant.nunique().sum()
+        self.logger.info(f"Total unique variants by condition and regimen (double-counted across-groups): {unq_var}")
+        unq_vars_per_reg = frame[["regCode", "variant"]].drop_duplicates().shape[0]
+        self.logger.info(f"Total unique variants: {unq_vars_per_reg}")
+
+        unq_short = frame.groupby(['condition','regCode']).shortString.nunique().sum()
+        self.logger.info(f"Total unique short strings by condition and regimen (double-counted across-groups): {unq_short}")
+        self.logger.info(
+            "#NOTE# " + (
+                "Multiple variants produce the same short string" if unq_var > unq_short else
+                "Each variant produces a unique short string" if unq_var == unq_short else
+                "Multiple short strings produced from a single variant – unlikely! Check for errors"
+            )
+        )
+        if unq_var > unq_short:
+            dup_counts = frame.shortString.value_counts()
+            self.logger.info(f"Number of short strings with multiple mappings: {len(dup_counts[dup_counts > 1])}")
+
+        self.logger.info(f"Total number of distinct short strings: {frame.shortString.nunique()}")
+        
+        dup_stats = (
+            frame.groupby("shortString")["condition"]
+            .nunique()  # unique condition count per shortString
+            .describe() # summary statistics
+        )
+        self.logger.warning(f"\n\n[SUMSTATS - 1] Short Strings shared across Conditions: \n{dup_stats}")
+
 
     def process(self, workdir, logs_dir, supplementary_file_path=None):
         """Process `sigs` by engineering `regString` and `shortString`."""
@@ -34,15 +73,14 @@ class Transform:
 
         # clean
         processed_file_path = apply_addapters(
-            frame_path=f"{workdir}/s_frame.parquet", 
+            frame_path=f"{workdir}/s_frame.parquet",  
             output_dir=workdir,
             supplementary=supplementary_file_path,
             logs_dir=logs_dir
         ) 
 
-        print(f"{processed_file_path=}")
       
-        # # SRE endpoint
+        # SRE endpoint
         obj = RegStringHandler(processed_file_path, log_dir=logs_dir)
         obj.process()
         frame = obj.frame
@@ -87,34 +125,10 @@ class Transform:
 
         frame = frame[final_sorted_cols]
 
-        # finalize and validate - drop duplicated components to unique shortStrings
         if frame.empty:
             raise ValueError("::ERR::`final table` is empty! Something went wrong!")
 
-        self.logger.info(f"Final frame shape: {frame.shape}")
-        self.logger.info(f"Total number of conditions: {frame.condition.nunique()}")
-        reg_num =frame.regCode.nunique()
-        self.logger.info(f"Total number of regimens: {reg_num}")
-        reg_num_cond =frame.groupby('condition').regCode.nunique().sum()
-        self.logger.info(f"Sum of regimens per condition: {reg_num_cond}")
-        self.logger.info(f"[Explain] - {'regimens repeat across conditions' if reg_num_cond > reg_num else 'regimens does not repeat across conditions'}")
-        unq_var = frame.groupby(['condition','regCode']).variant.nunique().sum()
-        self.logger.info(f"Total unique variants per condition and regimen: {unq_var}")
-        unq_short = frame.groupby(['condition','regCode']).shortString.nunique().sum()
-        self.logger.info(f"Total unique short Strings per condition and regimen: {unq_short}")
-        self.logger.info(f"[Explain] - {'Variants does not produce same short strings' if unq_var < unq_short else 'Variants produce same short strings'}")
-        if unq_var > unq_short:
-            dup_counts = frame.shortString.value_counts()
-            self.logger.info(f"Number of duplicated short strings: {len(dup_counts[dup_counts > 1])}")
-
-        self.logger.info(f"Total unique short Strings: {frame.shortString.nunique()}")
-        
-        dup_stats = (
-            frame.groupby("shortString")["condition"]
-            .nunique()  # unique condition count per shortString
-            .describe() # summary statistics
-        )
-        self.logger.warning(f"\n\n[SUMSTATS - 1] Short Strings shared across Conditions: \n{dup_stats}")
+        self.log_reports_and_sumstats(frame)
 
         cleaned_frame = (
             frame
@@ -157,7 +171,6 @@ class Transform:
        
         print("\n --- Running Transformation Process... --- \n")
 
-        # logs_dir = f"{workdir}/logs"
         workdir = os.path.dirname(output_path)
         os.makedirs(logs_dir, exist_ok=True)
        

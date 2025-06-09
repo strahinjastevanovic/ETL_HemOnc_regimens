@@ -53,6 +53,32 @@ class Handlers:
         ])
 
         return group
+    
+    @staticmethod
+    def patch_indeterminate_cycles(group: pl.DataFrame) -> pl.DataFrame:
+        """
+        Patch '(+c)' with '1' in cycle_length_lb or cycle_length_ub
+        only when cycle_length_unit == 'indeterminate'.
+        """
+
+        log_chunk = ""
+       
+        patch_mask = (
+            (pl.col("cycle_length_unit") == "indeterminate") &
+            (pl.col("cycle_length_lb") == "(+c)") |
+            (pl.col("cycle_length_ub") == "(+c)")
+        )
+
+        matching_rows = group.filter(patch_mask)
+
+        # Check how many rows matched
+        if matching_rows.height > 0:
+            log_chunk+=f"Applying patch to {matching_rows.height} rows with '(+c)' under cycle_length lb or ub"
+
+        return group.with_columns([
+            pl.when(patch_mask).then(pl.lit("1")).otherwise(pl.col("cycle_length_lb")).alias("cycle_length_lb"),
+            pl.when(patch_mask).then(pl.lit("1")).otherwise(pl.col("cycle_length_ub")).alias("cycle_length_ub"),
+        ]), log_chunk
         
         
 
@@ -91,9 +117,8 @@ class RegStringHandler:
 
     def _process_group(self, group: pl.DataFrame ) -> pl.DataFrame:
         """
-        Dose unique group processing
-        Note: all columns must not be NaN ! WIP
-        Input: regimen_cui .. variant_cui .. condition_cui
+        
+        Input: regimen_cui .. variant_cui .. condition_cui group
 
         # Boildown hierarchy
                    regimen -> variant > <portion?> -> components/cui -> step_number
@@ -104,6 +129,10 @@ class RegStringHandler:
         """ 
 
         group = Handlers.handle_timing_sequence(group)
+        group, log_chunk = Handlers.patch_indeterminate_cycles(group)
+
+        if log_chunk != "":
+            self.logger.error(f"[PATCHED] Detected unhandled case - {log_chunk}")
 
         # needed for matrix cration endpoint only!
         total_vector_len = get_last_cycle(group.select("timing_sequence").unique().to_series().to_list())
@@ -143,7 +172,7 @@ class RegStringHandler:
             # Decided to keep it this way for now instead of range or single value
             # Also in matrix, we are not mixing lb and ub at the moment!... ether all lb or ub...
             # It uses set not to repeat indeterminate cases, since both are = 1
-            cycle_lengths = set([cycle_length_lb, cycle_length_ub])
+            cycle_lengths = set(map(float, [cycle_length_lb, cycle_length_ub]))
             
             # Logs
             self.logger.info(f"-----Component: {drug}------")
@@ -161,7 +190,7 @@ class RegStringHandler:
                         )
                 except Exception as e:
                     group_id = group.select(['condition', 'regimen', 'variant']).to_dicts()
-                    self.logger.error(f"[SKIPPED days] {length} @ {cycle_length_unit} @ {allDays} : [ERR] {e}")
+                    self.logger.error(f"[SKIPPED days] Length:{length} @ CycLenUnit:{cycle_length_unit} @ allDays={allDays} : [ERR] {e}")
                     days_error = True
                     break
 
@@ -188,17 +217,18 @@ class RegStringHandler:
 
         # How many regStrings are we generating?
         n_strings = len(group_reg_string)
+        
+        if n_strings > 1:
+            group_id = group.select(['condition', 'regimen', 'variant']).to_numpy()[0, :]
+            self.logger.debug(f"N_STRINGS={n_strings} @ {group_id}")
 
-        # Duplicate the full group N times
+        # duplicate the full group N times
         group_repeated = pl.concat([group] * n_strings, how="vertical")
-
-        # Attach the regString column — one for each duplicate block
+        # attach the regString column — one for each duplicate block
         reg_string_col = pl.Series("regString", group_reg_string).repeat_by(group.height).explode()
-
-        # Final merged frame
+        # final frame 
         group_with_regstrings = group_repeated.with_columns(reg_string_col)
 
-    
         return group_with_regstrings
       
 
@@ -223,18 +253,19 @@ class RegStringHandler:
             
             start_time = time.time()
 
-            self.logger.info(f"Processing group: {group_df.select(group_names).unique().to_numpy()[0]}")
+        # Debuging cases
+            # self.logger.info(f"Processing group: {group_df.select(group_names).unique().to_numpy()[0]}")
+        #     dm_list = [  29570,   7333, 116702, 121537,  59546,  31986,  30172,
+        # 50101,  59563,   2610]
+            
+            # dm_list = list(map(str, dm_list))
 
-            dm_list = [  2554,  29570,   7333, 116702, 121537,  59546,  31986,  30172,
-        50101,  59563,   2610]
             
-            dm_list = list(map(str, dm_list))
-            
-            filtered = group_df.filter(pl.col("regimen_cui").is_in(dm_list))
-            if filtered.height > 0:
-                self.logger.debug(filtered.select([
-                    "component", "variant", "allDays", "timing_sequence", "cycle_length_unit"
-                ]))
+            # filtered = group_df.filter(pl.col("regimen_cui").is_in(dm_list))
+            # if filtered.height > 0:
+                # self.logger.debug(filtered.select([
+                    # "component", "regimen_cui", "variant", "allDays", "timing_sequence", "cycle_length_unit"
+                # ]))
             processed = self._process_group(group_df)
             results.append(processed)
          

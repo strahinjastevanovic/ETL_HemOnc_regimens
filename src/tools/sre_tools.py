@@ -77,15 +77,6 @@ def build_key_output(
         for pos in sorted_positions
     ])
 
-# def extract_position_lengths(
-#     input_dict: Dict[str, List[Tuple[str, np.ndarray]]]
-# ) -> Tuple[List[int], Dict[int, int]]:
-#     position_to_len = {}
-#     for variants in input_dict.values():
-#         for pos_str, vec in variants:
-#             for pos in map(int, pos_str.split(',')):
-#                 position_to_len[pos] = max(position_to_len.get(pos, 0), vec.shape[0])
-#     return sorted(position_to_len), position_to_len
 
 def extract_position_lengths(
     input_dict: Dict[str, List[Tuple[str, np.ndarray]]],
@@ -192,7 +183,7 @@ def validate_and_split_variants(input_dict: Dict[str, List[Tuple[str, np.ndarray
     unique_lengths = set(lengths.values())
 
     if len(unique_lengths) == 1:
-        # Case 1: All keys same length
+        #  case 1: All keys same length
         n = next(iter(unique_lengths))
         return [
             {k: input_dict[k][i] for k in input_dict}
@@ -200,7 +191,7 @@ def validate_and_split_variants(input_dict: Dict[str, List[Tuple[str, np.ndarray
         ]
 
     if len(unique_lengths) == 2 and 1 in unique_lengths:
-        # Case 2: One key has >1, rest have 1
+        # case 2: One key has >1, rest have 1
         long_key = max(lengths, key=lengths.get)
         if all(l == 1 or k == long_key for k, l in lengths.items()):
             n = lengths[long_key]
@@ -214,7 +205,7 @@ def validate_and_split_variants(input_dict: Dict[str, List[Tuple[str, np.ndarray
         else:
             raise ValueError("Variant lengths mismatch: mixed variant pattern is invalid.")
 
-    # Fallback for all other unexpected combinations
+    # fallback for all other unexpected combinations
     return None
 
 
@@ -330,12 +321,6 @@ def run_test():
         ress.extend(collapse_event_matrix_wrapper(x))
 
     assert ress == esv_expected, f"No match!\nActual:   {ress}\nExpected: {esv_expected}"
-    
-
-    case_1 = {'Cytarabine': [('1,2,3,4', np.array([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])), ('1,2,3,4', np.array([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]))], 'Mitoxantrone': [('1,2,3,4', np.array([1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])), ('1,2,3,4', np.array([1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]))]}
-    # print(case_1)
-    # print(f"{build_variant_outputs_numpy(case_1)=}")
-    # print(f"{collapse_event_matrix_wrapper(case_1)=}")
 
     print("All tests passed!")
 
