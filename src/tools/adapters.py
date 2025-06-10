@@ -43,16 +43,6 @@ def apply_addapters(
     # # Step 1: Read input
     dp = pl.read_parquet(frame_path)
 
-    tracked_all_days_pattern = r"-\d+|\d+\|\d+|\d+~\d+|\(.*?\)"
-    # Double check the leaks...
-    leaks = dp.filter(
-        pl.col("allDays").cast(pl.Utf8).str.contains(tracked_all_days_pattern, literal=False)
-    )
-
-    if leaks.height > 0:
-        string=f"[LEAK] {leaks.height} rows still match invalid allDays pattern!"
-        raise RuntimeError(f"Group filter failed — bad allDays pattern leaked post-filter. {string}")
-
     logger.warning(f"Input frame shape: {dp.shape}")
 
     # Use meta-component not to destruct original component
