@@ -89,7 +89,13 @@ class Runner:
 
         group_keys=["condition_cui", "regimen_cui", "variant_cui"]
         
-        self.s = self.s.drop_nulls(group_keys) # Clean NaNs from group keys - safe
+        # Nan condition_cui fallback
+        self.s = self.s.with_columns(
+            pl.col("condition_cui").fill_null("undefined")
+        )
+
+        # Clean NaNs from group keys - safe
+        self.s = self.s.drop_nulls(group_keys) 
 
         self.log_regimen_level_stats()
         self.log_cycle_length_unit(group_keys)
