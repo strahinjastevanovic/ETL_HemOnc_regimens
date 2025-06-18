@@ -64,7 +64,8 @@ def collapse(s: str) -> str:
 
 
 def test():
+    seq_out="27.bendamustine;1.bendamustine;"
     seq="27.Bendamustine;1.Bendamustine;27.Bendamustine;1.Bendamustine"
-    print(collapse_naive(seq))
+    assert collapse_naive(seq) == seq_out
 
 # test()

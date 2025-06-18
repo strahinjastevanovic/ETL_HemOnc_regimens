@@ -69,26 +69,26 @@ echo -e "\n%%% Pre-processing... %%%\n"
 python3 - <<EOF
 import sys
 sys.path.insert(0, "${SRC_DIR}")
-from pre_run import pre_run
+from preproc import preprocessing
 if __name__ == "__main__":
-    pre_run("${WORKDIR}/sigs_w_conditions.csv", "${WORKDIR}", "${LOGS}")
+    preprocessing("${WORKDIR}/sigs_w_conditions.csv", "${WORKDIR}", "${LOGS}", "${SUPP_FILE}")
 EOF
 
 echo -e "\n%%% Processing SIGs... %%%\n"
 python3 - <<EOF
 import sys
 sys.path.insert(0, "${SRC_DIR}")
-from transform_main import Transform  
+from transform import Transform  
 if __name__ == "__main__":
     transform = Transform()
-    transform.run("${REGIMEN_TSV}", "${SUPP_FILE}", "${LOGS}")
+    transform.run("${WORKDIR}/s_frame.parquet", "${REGIMEN_TSV}", "${LOGS}")
 EOF
 
 echo -e "\n%%% Generating updated regimen groups and valid drugs... %%%\n"
 python3 - <<EOF
 import sys
 sys.path.insert(0, "${SRC_DIR}")
-from other_ref import generate_reg_group, generate_valid_drugs 
+from serialization import generate_reg_group, generate_valid_drugs 
 if __name__ == "__main__":
     generate_reg_group("${REGIMEN_TSV_FULL}", "${REF_RGROUPS}", workdir="${WORKDIR}")
     generate_valid_drugs("${REGIMEN_TSV_FULL}", "${REF_VALIDDRUGS}", workdir="${WORKDIR}")

@@ -414,14 +414,8 @@
         "Prednisolone",
         "External beam radiotherapy"
     ],
-    "custom_2024_sigs_curated" : [
-        "Tetracycline",
-        "Lusutrombopag",
-        "Mesna",
-        "Autologous stem cells",
-        "Granulocyte colony-stimulating factor",
+    "custom_sigs_curated" : [
         "External beam radiotherapy",
-        "Allogeneic stem cells",
         "Afamitresgene autoleucel",
         "Axicabtagene ciloleucel",
         "Brexucabtagene autoleucel"

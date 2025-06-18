@@ -1,12 +1,3 @@
-# Doc: Description: "athena vocab queries" - pkg requirments - if any
-
-# backend
-
-# mapping:
-# input: INPUT_FILES_HEMONC/sigs.csv full-join regimen_cui -> concept_code many to many
-
-# output: sigs_conditions.csv ( optional: total number sumstats )
-
 import pandas as pd
 from sqlalchemy import create_engine
 import logging 

@@ -232,6 +232,51 @@ class RegStringHandler:
         return group_with_regstrings
       
 
+    def get_cycle_length_mismatch_regimens(df: pl.DataFrame) -> int:
+        numeric_pattern = r"^\d+(\.\d+)?$"
+
+        return pl.concat([
+            df.filter(
+                df["cycle_length_lb"].str.contains(numeric_pattern, literal=False) &
+                df["cycle_length_ub"].str.contains(numeric_pattern, literal=False)
+            )
+            .with_columns([
+                pl.col("cycle_length_lb").cast(pl.Float64).alias("lb"),
+                pl.col("cycle_length_ub").cast(pl.Float64).alias("ub")
+            ])
+            .filter(pl.col("lb") != pl.col("ub")),
+
+            df.filter(
+                ~df["cycle_length_lb"].str.contains(numeric_pattern, literal=False) &
+                ~df["cycle_length_ub"].str.contains(numeric_pattern, literal=False) &
+                df["cycle_length_lb"].is_not_null() &
+                df["cycle_length_ub"].is_not_null() &
+                (pl.col("cycle_length_lb") != pl.col("cycle_length_ub"))
+            )
+        ], how="vertical_relaxed")["regimen"].unique().height
+    
+    def log_timing_sequence_regimen_categories(self, df: pl.DataFrame):
+        condition_only_brackets = df["timing_sequence"].str.contains(r"^(\(.*?\),?)+$", literal=False)
+        condition_mixed_brackets = df["timing_sequence"].str.contains(r"\(.*?\)", literal=False)
+
+        # Compute masks
+        mask_only = condition_only_brackets
+        mask_mixed = ~condition_only_brackets & condition_mixed_brackets
+        mask_other = ~condition_only_brackets & ~condition_mixed_brackets
+
+        patch_mask = (
+            (df["cycle_length_unit"] == "indeterminate") &
+            ((df["cycle_length_lb"] == "(+c)") | (df["cycle_length_ub"] == "(+c)"))
+        )
+
+        lb_not_maching_ub = self.get_cycle_length_mismatch_regimens(df)
+        # Log unique resgimen counts per category
+        self.logger.info(f"[REPORT] Unique regimens (only brackets): {df.filter(mask_only)['regimen'].unique().height}")
+        self.logger.info(f"[REPORT] Unique regimens (mixed brackets): {df.filter(mask_mixed)['regimen'].unique().height}")
+        self.logger.info(f"[REPORT] Unique regimens (other): {df.filter(mask_other)['regimen'].unique().height}")
+        self.logger.info(f"[REPORT] Unique regimens (patch_mask): {df.filter(patch_mask)['regimen'].unique().height}")
+        self.logger.info(f"[REPORT] Unique regimens (ub_not_lb): {lb_not_maching_ub}")
+
     def process(self):
         print(f"SRE - Frame size: {self.frame.shape}")
         group_cols = ["regimen_cui", "variant_cui", "condition_cui"]
@@ -252,25 +297,9 @@ class RegStringHandler:
                 continue
             
             start_time = time.time()
-
-        # Debuging cases
-            # self.logger.info(f"Processing group: {group_df.select(group_names).unique().to_numpy()[0]}")
-        #     dm_list = [  29570,   7333, 116702, 121537,  59546,  31986,  30172,
-        # 50101,  59563,   2610]
-            
-            # dm_list = list(map(str, dm_list))
-
-            
-            # filtered = group_df.filter(pl.col("regimen_cui").is_in(dm_list))
-            # if filtered.height > 0:
-                # self.logger.debug(filtered.select([
-                    # "component", "regimen_cui", "variant", "allDays", "timing_sequence", "cycle_length_unit"
-                # ]))
             processed = self._process_group(group_df)
             results.append(processed)
-         
             progress.update(1)
-
             duration = time.time() - start_time
             if duration > 5:
                 print(f"[WARN] Slow group {group_key} took {duration:.2f}s — breaking for debug.")
