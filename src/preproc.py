@@ -75,9 +75,17 @@ class Frame:
         )
         return frame
  
+class Reporter:
+    def __init__(self, output):
+        self.output = output
+        os.makedirs(self.output, exist_ok=True)
+    def to_tsv(self, frame, file_name):
+        frame.write_csv(f"{self.output}/{file_name}.tsv", separator="\t")
+
 class NullValueHandlers:
-    def __init__(self, logger:object):
+    def __init__(self, logger:object, reporter:object):
         self.logger = logger
+        self.reporter = reporter
             
     def handle_nan_in_group_keys(self, frame, group_keys): 
         """Clean NaNs in group keys, removes groups with NaN keys"""
@@ -92,11 +100,8 @@ class NullValueHandlers:
         
         num_dropped_groups = dropped_groups_df.height
         
-        # find unique regimen names in the group
-        dropped_regimens = dropped_groups_df.select("regimen").unique().to_series().to_list()
-        
         self.logger.info(f"[REPORT] Dropped {num_dropped_groups} groups due to nulls in group_keys: \n{group_keys}\n")
-        self.logger.info(f"[Lookup] ---UNIQUE REGIMENS DROPPED---\n{dropped_regimens}")
+        self.reporter.to_tsv(dropped_groups_df, "null_group_keys")
         return frame
 
     def handle_nan_in_condition(self):
@@ -120,25 +125,17 @@ class NullValueHandlers:
 
         null_sig_df = frame.filter(pl.col("has_null_in_sig") == True)
 
-        # Extract unique regimens
-        null_sig_regimens = (
-            null_sig_df
-            .select("regimen")
-            .unique()
-            .to_series()
-            .to_list()
-        )
-
-        self.logger.info(f"[REPORT] Variants with NULLs in essentials — count: {null_sig_df.height}, unique regimens: \n{null_sig_regimens}")
-        self.logger.info(f"[Lookup] With NULLs in essentials unique regimens: \n{null_sig_regimens}")
+        self.logger.info(f"[REPORT] Variants with NULLs in essentials — count: {null_sig_df.height}")
+        self.reporter.to_tsv(null_sig_df, "null_sig")
         
         frame = frame.filter(~pl.col("has_null_in_sig")).drop("has_null_in_sig")
 
         return frame
 
 class RegimenHandler:
-    def __init__(self, logger:object):
+    def __init__(self, logger:object, reporter:object):
         self.logger = logger
+        self.reporter = reporter
             
     def log_regimen_level_stats(self, frame):
         """Log stats on full unfiltered data"""
@@ -152,17 +149,26 @@ class RegimenHandler:
             .select(pl.col("n_regimens")).sum().item()
         )
         self.logger.info(f"[REPORT] Total regimens per condition (unique): {unique_regimens_per_conditions}")
-    
+
+        group_keys_w_cui = ["condition", "condition_cui", "regimen", "regimen_cui", "variant", "variant_cui"]
+        unique_groups = (
+            frame.select(group_keys_w_cui)
+                .unique()
+        )
+        self.reporter.to_tsv(unique_groups, "unique_groups")
+
     def filter_rt(self, frame):
         """Handle RadioTherapy-containing regimens"""
 
         rt_pattern = r"(?:^|[\s,/])\(?(?:RT|SCRT|CSRT|WBRT|WB-XRT)\)?(?:[\s,)\-]|$)"
-        rt_match = (
-            frame
-            .filter(
+        filtered_rt = (
+            frame.filter(
                 pl.col("regimen").cast(pl.Utf8).str.contains(rt_pattern, literal=False) |
                 (pl.col("regimen") == "Whole brain irradiation")
             )
+        )
+        rt_match = (
+            filtered_rt
             .select("regimen")
             .unique()
         )
@@ -172,53 +178,15 @@ class RegimenHandler:
         
         # Log RT-containing stats
         rt_count    = rt_match.height
-        rt_list     = rt_match.to_series().to_list()
         self.logger.info(f"[REPORT] Regimens containing RT (spaced/parenthesized): {rt_count}")
-        self.logger.info(f"[Lookup] RT-regimen list:: \n{rt_list}")
+        self.reporter.to_tsv(filtered_rt, "radiotherapy_containing")
         
         return frame
 
-class IndefiniteValueHandlers:
-    def __init__(self, logger:object):
-        self.logger = logger
-
-    def log_cycle_length_unit(self, frame, group_keys):
-        """checks cycle_length for indeterminate"""
-
-        cycle_length_unit_indefinite = (
-            frame
-            .group_by(group_keys)
-            .agg([
-                (pl.col("cycle_length_unit") == "indeterminate").any().alias("has_indeterminate")
-            ])
-            .filter(pl.col("has_indeterminate"))
-            .shape[0]
-        )
-
-        cycle_length_unit_indefinite_regimens_unique = (
-            frame
-            .filter(pl.col("cycle_length_unit") == "indeterminate")
-            .group_by("regimen_cui")
-            .agg([
-                pl.col("variant_cui").n_unique().alias("n_variant")
-            ])
-            .select(pl.col("n_variant").sum())
-            .item()
-        )
-
-        self.logger.info(f"[REPORT] cycle_length_unit / indeterminate variants: {cycle_length_unit_indefinite} ({cycle_length_unit_indefinite_regimens_unique} unique regimen variants)")
-
-    def log_cycle_length_ub_c(): # TODO
-        """Logs cases where (c+) exist in ub"""
-        pass 
-    
-    def log_field_indefinite(self, fields): # TODO
-        """Logs cases where (c+, n+)  or (+c, +n) exist in <fields>"""
-        pass
-
 class VariantHandler:
-    def __init__(self, logger:object):
+    def __init__(self, logger:object, reporter:object):
         self.logger = logger
+        self.reporter = reporter
 
     def create_checkopoint_frame(self, frame, group_keys):
         """Create checkpoint of variant groups (to verify nothing is lost)"""
@@ -230,11 +198,17 @@ class VariantHandler:
         # Total variants and unique regimen-variant pairs
         uniq = frame.select(group_keys).unique()
         n_variants = uniq.height
-        n_regimen_variants = (
+        regimen_variants = (
             uniq.select(["regimen_cui", "variant_cui"])
                 .unique()
                 .group_by("regimen_cui")
                 .agg(pl.col("variant_cui").n_unique().alias("n_variant"))
+        )
+
+        self.reporter.to_tsv(regimen_variants, "regimen_variants_n_unique")
+
+        n_regimen_variants = (
+            regimen_variants
                 .select(pl.col("n_variant").sum())
                 .item()
         )
@@ -263,22 +237,73 @@ class VariantHandler:
 
         for row in counts.iter_rows(named=True):
             self.logger.info(f"[REPORT] {row['sig_type']} — total: {row['count']}, unique variants: {row['n_variants']}")
-            self.logger.info(f"[Lookup] {row['sig_type']} unique regimens list: \n{row['regimens']}")
 
         assert counts["n_variants"].sum() == n_regimen_variants
 
         multi_part_df = s.filter(pl.col("sig_type") == "Multi-part Sig") 
         single_part_df = s.filter(pl.col("sig_type") == "Single-part Sig")
+
+        self.reporter.to_tsv(multi_part_df, "multi_part_sigs")
+        self.reporter.to_tsv(single_part_df, "single_part_sigs")
+
         # cleaning
         single_part_df = single_part_df.drop("sig_type")  
         multi_part_df = multi_part_df.drop("sig_type")
         return single_part_df, multi_part_df
 
 class PatternHandlers:
-    def __init__(self, logger:object):
+    def __init__(self, logger:object, reporter:object):
         self.logger = logger 
+        self.reporter = reporter
+    
+    def log_indefinite_cycle_length(self, frame, group_keys):
+        """checks cycle_length for indeterminate - indefinite value handler"""
 
-    def all_days_pattern_handler(self, frame, group_keys): # singlepart_df
+        groups_with_indeterminate = (
+            frame
+            .group_by(group_keys)
+            .agg([
+                (pl.col("cycle_length_unit") == "indeterminate").any().alias("has_indeterminate")
+            ])
+            .filter(pl.col("has_indeterminate"))
+        )
+
+        cycle_length_unit_indefinite = (
+            groups_with_indeterminate
+            .shape[0]
+        )
+
+        cycle_length_unit_indefinite_df = frame.join(groups_with_indeterminate, on=group_keys, how="inner")
+        self.reporter.to_tsv(cycle_length_unit_indefinite_df, "cycle_length_unit_indefinite")
+
+        cycle_length_unit_indefinite_regimens_unique = (
+            frame
+            .filter(pl.col("cycle_length_unit") == "indeterminate")
+            .group_by("regimen_cui")
+            .agg([
+                pl.col("variant_cui").n_unique().alias("n_variant")
+            ])
+            .select(pl.col("n_variant").sum())
+            .item()
+        )
+
+        self.logger.info(f"[REPORT] cycle_length_unit / indeterminate variants: {cycle_length_unit_indefinite} ({cycle_length_unit_indefinite_regimens_unique} unique regimen variants)")
+
+    def log_cycle_length_indefinite(self,fields): # TODO
+        """Logs cases where (+c or c) exist in cycle_length_ub or cycle_length_lb"""
+        pass 
+    
+    def log_field_indefinite(self, fields): # TODO
+        """Logs cases where allDays (+c, +n)  or timing_sequence (+c, +n, +1, +2) exist in <fields>"""
+        pass
+    
+    # TODO: Note that allDays pattern currently captures these in allDays - 
+    # it would be best to separate concern for each, the \(.*?\) part...
+    def log_optional_containing(self,fields):
+        """Log cases where (\d) exist in timing_sequence or allDays""" 
+        pass
+
+    def all_days_pattern_handler(self, frame, group_keys): 
         """Handled pattern in allDays""" 
         tracked_all_days_pattern = r"-\d+|\d+\|\d+|\d+~\d+|\(.*?\)"
         valid_group_ids = (
@@ -293,24 +318,10 @@ class PatternHandlers:
         # Anti-join to get invalid groups (with patterns in allDays)
         valid_groups = frame.join(valid_group_ids, on=group_keys, how="inner")
         invalid_groups = frame.join(valid_group_ids, on=group_keys, how="anti")
-        invalid_regimens = (
-            invalid_groups
-            .select("regimen")
-            .unique()
-            .to_series()
-            .to_list()
-        )
-        matched_all_days = (
-            invalid_groups
-            .select("allDays")
-            .unique()
-            .to_series()
-            .to_list()
-        )
+        invalid_groups_keys = invalid_groups.select(group_keys).unique().height
 
-        self.logger.info(f"[REPORT] Groups WITH allDays pattern — groups: {invalid_groups.select(group_keys).unique().height}")
-        self.logger.info(f"[Lookup] Groups WITH allDays pattern unique regimens:\n{invalid_regimens}")
-        self.logger.info(f"[Lookup] Matching allDays patterns:\n{matched_all_days}")
+        self.logger.info(f"[REPORT] Groups WITH allDays pattern — groups: {invalid_groups_keys}")
+        self.reporter.to_tsv(invalid_groups, "with_allDays_pattern")
        
         # Double check the leaks...
         leaks = valid_groups.filter(
@@ -322,6 +333,69 @@ class PatternHandlers:
             raise RuntimeError("Group filter failed — bad allDays pattern leaked post-filter.")
         
         return valid_groups, invalid_groups
+
+class SupplementaryHandler:
+    def __init__(self, logger:object, reporter:object):
+        self.logger = logger
+        self.reporter = reporter
+
+    @staticmethod
+    def clean_text(text: str) -> str:
+        return re.sub(r"[^\w\s]", "", str(text)).strip().lower()
+
+    @staticmethod
+    def proc_blist_naive(blist: list) -> list:
+        blist = [l for subli in [s.split("(") for s in blist] for l in subli]
+        return [s.strip(")").strip().lower() for s in blist]
+
+    def clean_components_and_add_meta(self, frame, supplementary=None):
+        """
+        Removes blacklisted components; 
+        Will drop variant_cui if all its components are blacklisted.
+        Return invalid - variant_cui droped, valid - passed after cleanup
+
+        Creates metaCondition - side effect TODO...
+        """
+
+        self.logger.info(f"Input shape: {frame.shape}")
+        frame = frame.with_columns(
+            pl.col("component").cast(str).map_elements(self.clean_text).alias("meta_component")
+        )
+
+        blacklist_set = set()
+        if supplementary:
+            bl_json = json.load(open(supplementary))
+            blacklist_set = set(self.proc_blist_naive(bl_json.get("custom_sigs_curated", [])))
+
+        frame = frame.with_columns(
+            pl.col("meta_component").is_in(blacklist_set).alias("is_blacklisted")
+        )
+
+        # Count how many components are blacklisted
+        if blacklist_set:
+            n_drop = frame.filter("is_blacklisted").height
+            dropped = frame.filter("is_blacklisted").select("component").unique().to_series().to_list()
+            self.logger.info(f"[REPORT] Dropped {n_drop} components from blacklist ({len(blacklist_set)} items).")
+            for comp in dropped:
+                self.logger.info(f"[Lookup] DROPPED: {comp}")
+        else:
+            self.logger.info("No blacklist applied.")
+
+        # Drop blacklisted components
+        frame_clean = frame.filter(~pl.col("is_blacklisted"))
+
+        # Determine dropped variant_cui group keys
+        valid_keys = frame_clean.select(["regimen_cui", "variant_cui"]).unique()
+        valid = frame_clean.drop(["is_blacklisted", "meta_component"])
+        invalid = frame.join(valid_keys, on=["regimen_cui", "variant_cui"], how="anti").drop(["is_blacklisted", "meta_component"])
+        
+        self.logger.info(f"Output shape: {valid.shape}")
+        self.reporter.to_tsv(invalid, "supplementary_dropped")
+        
+        n_dropped = invalid.select(["regimen_cui", "variant_cui"]).unique().height
+        self.logger.info(f"[REPORT] Removed variants as supplementary - {n_dropped}")
+        
+        return valid, invalid
 
 class Sumstats:
     def __init__(self, logger:object):
@@ -379,75 +453,16 @@ class Sumstats:
         self.logger.info(f"[REPORT] Standrad variants: {standard.shape[0]} ({standard_regimens_unique} unique regimen variants)")
         self.logger.info(f"[REPORT] Funny variants: {funny_unique} ({funny_regimens_unique} unique regimen variants)")
 
-class SupplementaryHandler:
-    def __init__(self, logger:object):
-        self.logger = logger
-
-    @staticmethod
-    def clean_text(text: str) -> str:
-        return re.sub(r"[^\w\s]", "", str(text)).strip().lower()
-
-    @staticmethod
-    def proc_blist_naive(blist: list) -> list:
-        blist = [l for subli in [s.split("(") for s in blist] for l in subli]
-        return [s.strip(")").strip().lower() for s in blist]
-
-    def clean_components_and_add_meta(self, frame, supplementary=None):
-        """
-        Removes blacklisted components; 
-        Will drop variant_cui if all its components are blacklisted.
-        Return invalid - variant_cui droped, valid - passed after cleanup
-
-        Creates metaCondition - side effect TODO...
-        """
-
-        self.logger.info(f"Input shape: {frame.shape}")
-        frame = frame.with_columns(
-            pl.col("component").cast(str).map_elements(self.clean_text).alias("meta_component")
-        )
-
-        blacklist_set = set()
-        if supplementary:
-            bl_json = json.load(open(supplementary))
-            blacklist_set = set(self.proc_blist_naive(bl_json.get("custom_sigs_curated", [])))
-
-        frame = frame.with_columns(
-            pl.col("meta_component").is_in(blacklist_set).alias("is_blacklisted")
-        )
-
-        # Count how many components are blacklisted
-        if blacklist_set:
-            n_drop = frame.filter("is_blacklisted").height
-            dropped = frame.filter("is_blacklisted").select("component").unique().to_series().to_list()
-            self.logger.info(f"[REPORT] Dropped {n_drop} components from blacklist ({len(blacklist_set)} items).")
-            for comp in dropped:
-                self.logger.info(f"[Lookup] DROPPED: {comp}")
-        else:
-            self.logger.info("No blacklist applied.")
-
-        # Drop blacklisted components
-        frame_clean = frame.filter(~pl.col("is_blacklisted"))
-
-        # Determine dropped variant_cui group keys
-        valid_keys = frame_clean.select(["regimen_cui", "variant_cui"]).unique()
-        valid = frame_clean.drop(["is_blacklisted", "meta_component"])
-        invalid = frame.join(valid_keys, on=["regimen_cui", "variant_cui"], how="anti").drop(["is_blacklisted", "meta_component"])
-
-        self.logger.info(f"Output shape: {valid.shape}")
-        n_dropped = invalid.select(["regimen_cui", "variant_cui"]).unique().height
-        self.logger.info(f"[REPORT] Removed variants as supplementary - {n_dropped}")
-        return valid, invalid
-
-
 
 
 class Preprocessor:
-    def __init__(self, sigs_path, log_dir=".", supplementary_file=None):
+    def __init__(self, sigs_path, output_dir, log_dir=".", supplementary_file=None,):
        
         self.logger     = Logger(log_dir, )
         self.logger_sup = Logger(log_dir, "PRE.supplementary.log")
         self.audits     = AuditColumnTypes(log_dir, "PRE.audit.log")
         self.audits.audit(sigs_path)
+        self.reporter   = Reporter(f"{output_dir}/report_tables") 
 
         self.s          = Frame().load_data(sigs_path)
         self.sf         = supplementary_file
@@ -462,12 +477,11 @@ class Preprocessor:
         ]
 
     def initialize(self, ):
-        self.null_handlers       = NullValueHandlers(self.logger)
-        self.regimen_handler     = RegimenHandler(self.logger)
-        self.variant_handler     = VariantHandler(self.logger)
-        self.indefinite_handlers = IndefiniteValueHandlers(self.logger)
-        self.pattern_handlers    = PatternHandlers(self.logger)
-        self.supp_handler        = SupplementaryHandler(self.logger_sup)
+        self.null_handlers       = NullValueHandlers(self.logger, self.reporter)
+        self.regimen_handler     = RegimenHandler(self.logger, self.reporter)
+        self.variant_handler     = VariantHandler(self.logger, self.reporter)
+        self.pattern_handlers    = PatternHandlers(self.logger, self.reporter)
+        self.supp_handler        = SupplementaryHandler(self.logger_sup, self.reporter)
         self.sumstats            = Sumstats(self.logger)
         return self # enables chaining
 
@@ -486,7 +500,7 @@ class Preprocessor:
         self.regimen_handler.log_regimen_level_stats(frame)
         frame = self.regimen_handler.filter_rt(frame)
         # ----------- 3 ------------
-        self.indefinite_handlers.log_cycle_length_unit(frame, fields)
+        self.pattern_handlers.log_indefinite_cycle_length(frame, fields)
         # ----------- 4 ------------
         checkpoint_df = self.variant_handler.create_checkopoint_frame(frame, group_keys) # safeguard
         # ----------- 5 - 2nd level subset block -variant level splits ------------
@@ -495,8 +509,9 @@ class Preprocessor:
         cleaned_df, dropped_df = self.supp_handler.clean_components_and_add_meta(valid_df, supplementary_file)
         # ----------- 6 - rejoin filtered -----------
         funny_df = self.sumstats.concat_with_overlap_diagonstics(invalid_df, multi_df, dropped_df, group_keys)
-        # ------------ 8-----------
+        # ------------ 8 - logs + reports -----------
         self.sumstats.log_summary(cleaned_df, funny_df, checkpoint_df, group_keys)
+        self.reporter.to_tsv(cleaned_df, "preproc_cleaned")
         
         # ---- << final frame >> ----
         self.processed = cleaned_df.clone()
@@ -518,8 +533,9 @@ def preprocessing(
     print("[INFO] Starting preprocessing run...")
     proc = Preprocessor(
         sigs_path=sigs_file,
+        output_dir=output_dir,
         log_dir=log_dir,
-        supplementary_file=supplementary_file
+        supplementary_file=supplementary_file,
     ).initialize().run()
 
     dp = proc.get_processed()
