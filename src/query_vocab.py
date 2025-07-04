@@ -46,6 +46,9 @@ def main(
     log_dir = None,
    ):
   
+  if os.path.exists(output_file):
+      return 1
+  
   engine = create_engine(f"postgresql://{credentials['username']}:{credentials['password']}@{credentials['host']}:{credentials['port']}/{credentials['db']}")
 
   query = """
@@ -80,7 +83,7 @@ def main(
   df.to_csv(vocab_file, index=False)
 
   # read sigs
-  sg = pd.read_csv(inupt_file)
+  sg = pd.read_csv(inupt_file, low_memory=False)
 
   print(f"[InputSigsShape] {sg.shape}")
 

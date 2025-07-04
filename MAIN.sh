@@ -32,7 +32,7 @@ mkdir -p "$WORKDIR"
 # --- Paths ---
 # HEMONC_VERSION='2024-12-18\nSource:\nJeremy Warner MD, MS, 2021, \n"HemOnc knowledgebase", \nhttps://doi.org/10.7910/DVN/FPO4HB, Harvard Dataverse, V45, UNF:6:hDCRZx6AGBRIU68MJeG21Q== [fileUNF]'
 HEMONC_VERSION='2025-03-15\nSource:\nJeremy Warner MD, MS, 2021, \n"HemOnc knowledgebase", \nhttps://doi.org/10.7910/DVN/FPO4HB, Harvard Dataverse, V45, UNF:6:hDCRZx6AGBRIU68MJeG21Q== [fileUNF]'
-SIGS_FILE="sigs_2025.csv"
+SIGS_FILE="sigs_2025_6.csv"
 FILES_ROOT="INPUT_FILES_HEMONC"
 REF_DIR="OTHER_REF"
 REF_RGROUPS="${REF_DIR}/rgroups_template.tsv"
@@ -52,7 +52,7 @@ import os
 from dotenv import load_dotenv
 load_dotenv(dotenv_path=os.path.join(os.getcwd(), '.env'))
 sys.path.insert(0, "${SRC_DIR}")
-from vocab_query import main
+from query_vocab import main
 if __name__ == "__main__":
     credentials = {
       "username":os.getenv('USERNAME'),
@@ -88,7 +88,7 @@ echo -e "\n%%% Generating updated regimen groups and valid drugs... %%%\n"
 python3 - <<EOF
 import sys
 sys.path.insert(0, "${SRC_DIR}")
-from serialization import generate_reg_group, generate_valid_drugs 
+from serialize import generate_reg_group, generate_valid_drugs 
 if __name__ == "__main__":
     generate_reg_group("${REGIMEN_TSV_FULL}", "${REF_RGROUPS}", workdir="${WORKDIR}")
     generate_valid_drugs("${REGIMEN_TSV_FULL}", "${REF_VALIDDRUGS}", workdir="${WORKDIR}")
@@ -107,6 +107,6 @@ save(regimengroups, file = "${WORKDIR}/regimengroups.rda")
 EOF
 
 echo -e "\n%%% Writing Validation report... %%%\n"
-python3 "${SRC_DIR}/validation_check.py" "${WORKDIR}" "${REGIMEN_TSV_FULL}"
+python3 "${SRC_DIR}/validate.py" "${WORKDIR}" "${REGIMEN_TSV_FULL}"
 
 echo -e "\n%%% Done. Outputs saved in: $WORKDIR %%%\n"

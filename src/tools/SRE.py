@@ -79,8 +79,6 @@ class Handlers:
             pl.when(patch_mask).then(pl.lit("1")).otherwise(pl.col("cycle_length_lb")).alias("cycle_length_lb"),
             pl.when(patch_mask).then(pl.lit("1")).otherwise(pl.col("cycle_length_ub")).alias("cycle_length_ub"),
         ]), log_chunk
-        
-        
 
 class RegStringHandler:
     def __init__(self, frame_path: str, log_dir: str):
@@ -135,7 +133,11 @@ class RegStringHandler:
             self.logger.error(f"[PATCHED] Detected unhandled case - {log_chunk}")
 
         # needed for matrix cration endpoint only!
-        total_vector_len = get_last_cycle(group.select("timing_sequence").unique().to_series().to_list())
+        try:
+            total_vector_len = get_last_cycle(group.select("timing_sequence").unique().to_series().to_list())
+        except:
+            print(group.select("timing_sequence").unique().to_series().to_list())
+            print(1/0)
 
         # Is there any group size greater then 1?
         # NOTE: current implementation does not support duplicate components per MAIN group
@@ -221,6 +223,7 @@ class RegStringHandler:
         if n_strings > 1:
             group_id = group.select(['condition', 'regimen', 'variant']).to_numpy()[0, :]
             self.logger.debug(f"N_STRINGS={n_strings} @ {group_id}")
+            self.logger.debug(group_reg_string)
 
         # duplicate the full group N times
         group_repeated = pl.concat([group] * n_strings, how="vertical")
