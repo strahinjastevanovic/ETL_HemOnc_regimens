@@ -31,7 +31,7 @@ mkdir -p "$WORKDIR"
 
 # --- Run Definition ---
 VERSION="2025-03-15"
-DESCRIPTION="$VERSION\nSource:\nJeremy Warner MD, MS, 2021, \nHemOnc knowledgebase, \nhttps://doi.org/10.7910/DVN/FPO4HB, Harvard Dataverse, V45, UNF:6:hDCRZx6AGBRIU68MJeG21Q== [fileUNF]"
+DESCRIPTION="$VERSION\nSource:\nJeremy Warner MD, MS, 2021, \n'HemOnc knowledgebase', \nhttps://doi.org/10.7910/DVN/FPO4HB, Harvard Dataverse, V45, UNF:6:hDCRZx6AGBRIU68MJeG21Q== [fileUNF]"
 SIGS_FILE="sigs_march_2025.csv"
 FILES_ROOT="INPUT_FILES_HEMONC"
 REF_DIR="OTHER_REF"

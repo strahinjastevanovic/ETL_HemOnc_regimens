@@ -482,7 +482,7 @@ class SupplementaryHandler:
         blist = [l for subli in [s.split("(") for s in blist] for l in subli]
         return [s.strip(")").strip().lower() for s in blist]
 
-    def clean_components(self, frame, supplementary=None):
+    def clean_by_blacklist(self, frame, supplementary=None):
         """
         Removes blacklisted components; 
         Will drop variant_cui if all its components are blacklisted.
@@ -499,7 +499,7 @@ class SupplementaryHandler:
         blacklist_set = set()
         if supplementary:
             bl_json = json.load(open(supplementary))
-            blacklist_set = set(self.proc_blist_naive(bl_json.get("custom_sigs_curated", [])))
+            blacklist_set = set(self.proc_blist_naive(bl_json.get("custom", [])))
 
         frame = frame.with_columns(
             pl.col("meta_component").is_in(blacklist_set).alias("is_blacklisted")
@@ -518,18 +518,21 @@ class SupplementaryHandler:
         # Drop blacklisted components
         frame_clean = frame.filter(~pl.col("is_blacklisted"))
 
-        # Determine dropped variant_cui group keys
-        valid_keys = frame_clean.select(["regimen_cui", "variant_cui"]).unique()
-        valid = frame_clean.drop(["is_blacklisted", "meta_component"])
-        invalid = frame.join(valid_keys, on=["regimen_cui", "variant_cui"], how="anti").drop(["is_blacklisted", "meta_component"])
+        # Determine dropped variant_cui group keys --- this block cleans entire groups
+        # valid_keys = frame_clean.select(["regimen_cui", "variant_cui"]).unique()
+        # invalid = frame.join(valid_keys, on=["regimen_cui", "variant_cui"], how="anti").drop(["is_blacklisted", "meta_component"])
         
+        # This block removes only records...
+        valid = frame_clean.drop(["is_blacklisted", "meta_component"])
+        invalid = frame.filter(pl.col("is_blacklisted")).drop(["is_blacklisted", "meta_component"])
+
         self.logger.info(f"Output shape: {valid.shape}")
         self.reporter.to_tsv(invalid, "supplementary_dropped")
         
         n_dropped = invalid.select(["regimen_cui", "variant_cui"]).unique().height
         self.logger.info(f"[REPORT] Removed variants as supplementary - {n_dropped}")
         
-        return valid, invalid
+        return valid
 
     def clean_by_role(self, frame, field="component_role"):
         dropped = frame.filter(pl.col(field).is_in(['secondary systemic', 'locoregional']))
@@ -633,10 +636,11 @@ class Preprocessor:
         frame = self.s.clone()
         group_keys = self.group_keys
         fields = self.sigs_anatomy_essentials
-        # supplementary_file = self.sf
+        supplementary_file = self.sf
 
         # ----------- 1 -- 1st level subset block -component level dropouts, variants kept ------------
         frame = self.supp_handler.clean_by_role(frame) 
+        frame = self.supp_handler.clean_by_blacklist(frame, supplementary_file) 
 
         # ----------- 2 2nd  level subset block -regimen level dropouts ------------
         frame = self.null_handlers.handle_nan_in_group_keys(frame, group_keys)
@@ -651,11 +655,9 @@ class Preprocessor:
         valid_df, invalid_df_1 = self.pattern_handlers.all_days_pattern_handler(single_df, group_keys)
         cleaned_df, invalid_df_2 = self.pattern_handlers.from_to_by_pattern_handler(valid_df, group_keys)
         
-        # # ----------- 4 - 3rd level subset block -component level dropouts, variants kept ------------
-        # cleaned_df = self.supp_handler.clean_by_role(valid_df) 
-        # # ----------- 5 - rejoin filtered -----------
+        # # ----------- 4 - rejoin filtered -----------
         funny_df = self.sumstats.concat_with_overlap_diagonstics(subsets=[("invalid_1", invalid_df_1), ("invalid_2", invalid_df_2), ("multi", multi_df)], group_keys=group_keys)
-        # ------------ 6 - logs + reports -----------
+        # ------------ 5 - logs + reports -----------
         self.sumstats.log_summary(cleaned_df, funny_df, checkpoint_df, group_keys)
         self.reporter.to_tsv(cleaned_df, "preproc_cleaned")
         # ---- << final frame >> ----
