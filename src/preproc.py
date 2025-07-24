@@ -105,13 +105,24 @@ class NullValueHandlers:
         self.reporter.to_tsv(dropped_groups_df, "null_group_keys")
         return frame
 
-    def handle_nan_in_condition(self):
-        # TODO: Nan condition_cui fallback 
-        # self.s = self.s.with_columns(
-        #     pl.col("condition_cui").fill_null("undefined"),
-        #     pl.col("condition").fill_null("undefined")
-        # )
-        pass
+    def handle_nan_in_condition(self, frame):
+        null_rows = frame.filter(
+            pl.col("condition_cui").is_null() | pl.col("condition").is_null()
+        )
+        num_affected = null_rows.height
+        num_unique_regimens = null_rows.select("regimen").unique().height
+        unique_regimens = null_rows.select("regimen").unique()
+        
+
+        frame = frame.with_columns(
+            pl.col("condition_cui").fill_null("undefined"),
+            pl.col("condition").fill_null("undefined")
+        )
+        self.logger.info(f"[REPORT] Filled {num_affected} (unique regimens: {num_unique_regimens} ) records with nulls in condition/condition_cui.")
+        self.reporter.to_tsv(null_rows, "null_condition")
+        self.reporter.to_tsv(unique_regimens, "null_condition_regimens_unique")
+        return frame
+        
    
     def handle_null_in_sigs(self, frame, fields, group_keys):
         """Filter out entire variants where any record has nulls in essential fields"""
@@ -406,7 +417,8 @@ class PatternHandlers:
     # Filters by variant
     def all_days_pattern_handler(self, frame, group_keys): 
         """Handled pattern in allDays field""" 
-        tracked_all_days_pattern = r"-\d+|\d+\|\d+|\d+~\d+|\(.*?\)|0"
+        # tracked_all_days_pattern = r"-\d+|\d+\|\d+|\d+~\d+|\(.*?\)|0"
+        tracked_all_days_pattern = r"-\d+|\d+\|\d+|\d+~\d+|\(.*?\)|\b0\b"
         valid_group_ids = (
             frame.group_by(*group_keys)
                 .agg((~pl.col("allDays").cast(pl.Utf8)
@@ -643,6 +655,7 @@ class Preprocessor:
         frame = self.supp_handler.clean_by_blacklist(frame, supplementary_file) 
 
         # ----------- 2 2nd  level subset block -regimen level dropouts ------------
+        frame = self.null_handlers.handle_nan_in_condition(frame)
         frame = self.null_handlers.handle_nan_in_group_keys(frame, group_keys)
         frame = self.null_handlers.handle_null_in_sigs(frame, fields, group_keys)
         self.regimen_handler.log_regimen_level_stats(frame)
