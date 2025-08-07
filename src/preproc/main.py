@@ -44,7 +44,7 @@ class NullValueHandlers:
         num_dropped_groups = dropped_groups_df.height
         
         self.logger.info(f"[REPORT] Removed {num_dropped_groups} groups due to nulls in group keys: \n{group_keys}\n")
-        self.reporter.resolve(dropped_groups_df, "null_group_keys", pattern="{c}, {r} and {v} keys should not be empty", field="{cc}, {rc}, {vc}, {r}", status="N")
+        self.reporter.to_tsv(dropped_groups_df, "null_group_keys")
         return frame
 
     def handle_nan_in_condition(self, frame):
@@ -60,7 +60,7 @@ class NullValueHandlers:
             pl.col("condition").fill_null("undefined")
         )
         self.logger.info(f"[REPORT] Filled {num_affected} (unique regimens: {num_unique_regimens} ) records with nulls in condition/condition_cui.")
-        self.reporter.resolve(null_rows, "null_condition", pattern="{c} should not be missing and in-sync with AthenaDB.", field="{cc}, {c}", status="P")
+        self.reporter.resolve(null_rows, "null_condition", pattern="Missing {c} or out of sync with AthenaDB.", field="{cc}, {c}", status="P")
         self.reporter.to_tsv(unique_regimens, "null_condition_regimens_unique")
         return frame
         
@@ -336,8 +336,6 @@ class VariantHandler:
         # cleaning
         single_part_df = single_part_df.drop("sig_type")  
         multi_part_df = multi_part_df.drop("sig_type")
-        print(single_part_df.shape, multi_part_df.shape)
-        print(1/0)
         return single_part_df, multi_part_df
     
 class PatternHandlers:
@@ -363,7 +361,7 @@ class PatternHandlers:
         )
 
         cycle_length_unit_indefinite_df = frame.join(groups_with_indeterminate, on=group_keys, how="inner")
-        self.reporter.resolve(cycle_length_unit_indefinite_df, "cycle_length_unit_indefinite", pattern="indeterminate", field="{unit}", status="P")
+        self.reporter.resolve(cycle_length_unit_indefinite_df, "cycle_length_unit_indefinite", pattern="Cycle length unit is indeterminate.", field="{unit}", status="P")
 
         cycle_length_unit_indefinite_regimens_unique = (
             frame
@@ -405,7 +403,7 @@ class PatternHandlers:
         invalid_groups_keys = invalid_groups.select(group_keys).unique().height
 
         self.logger.info(f"[REPORT] Number of variants with unhandled allDays pattern: {invalid_groups_keys}")
-        self.reporter.resolve(invalid_groups, "with_allDays_pattern",pattern=tracked_all_days_pattern, field="{ad}", status="N")
+        self.reporter.resolve(invalid_groups, "with_allDays_pattern",pattern="Negative units, optional elements, starting on 0th day", field="{ad}", status="N")
        
         # Safeguard
         leaks = valid_groups.filter(
@@ -512,7 +510,7 @@ class SupplementaryHandler:
         invalid = frame.filter(pl.col("is_blacklisted")).drop(["is_blacklisted", "meta_component"])
 
         self.logger.info(f"Output shape: {valid.shape}")
-        self.reporter.resolve(invalid, "supplementary_dropped", pattern="Filtered item from a blacklist.", field="{c}", status="N")
+        self.reporter.resolve(invalid, "supplementary_dropped", pattern="Filtered item from a blacklist.", field="{c}", status="P")
         
         n_dropped = invalid.select(["regimen_cui", "variant_cui"]).unique().height
         self.logger.info(f"[REPORT] Removed variants as supplementary - {n_dropped}")
@@ -520,19 +518,25 @@ class SupplementaryHandler:
         return valid
 
     def clean_by_role(self, frame, field="component_role"):
-        dropped_ss = frame.filter(pl.col(field).is_in(['secondary systemic']))
-        dropped_lo = frame.filter(pl.col(field).is_in(['locoregional']))
-        
-        def process(dropped, name="component_role_secondary"):
-            dropped_components_count = dropped.select("component").n_unique()
-            self.reporter.resolve(dropped, name, pattern="Filtered component by role.", field="{c}, {cr}", status="N")
-            self.logger.info(f"[REPORT] Removed supplementary records kept variants in groups ({name}): {round(dropped.shape[0] / frame.shape[0], 2)}% - Components loss number: {dropped_components_count}")
-            filtered = frame.join(dropped, on=frame.columns, how="anti")
-            return filtered
-        
-        filtered_ss = process(dropped_ss, "component_role_secondary_systemic")
-        filtered_lo = process(dropped_lo, "component_role_locoregional")
-        filtered = pl.concat([filtered_ss, filtered_lo])
+        dropped = []
+
+        for value, name in [
+            ('secondary systemic', 'component_role_secondary_systemic'),
+            ('locoregional', 'component_role_locoregional')
+        ]:
+            subset = frame.filter(pl.col(field) == value)
+            dropped.append(subset)
+
+            dropped_components_count = subset.select("component").n_unique()
+            self.reporter.resolve(subset, name, pattern="Filtered component by role.", field="{co}, {cr}", status="N")
+            self.logger.info(
+                f"[REPORT] Removed supplementary records ({name}): "
+                f"{round(subset.shape[0] / frame.shape[0], 2)}% - "
+                f"Components loss number: {dropped_components_count}"
+            )
+
+        all_dropped = pl.concat(dropped)
+        filtered = frame.join(all_dropped, on=frame.columns, how="anti")
         return filtered
 
 class Sumstats:
@@ -636,7 +640,6 @@ class Preprocessor:
         # ----------- 1 level subset block -component level dropouts, variants kept ------------
         frame = self.supp_handler.clean_by_role(frame) 
         frame = self.supp_handler.clean_by_blacklist(frame, supplementary_file) 
-        print(frame.shape)
 
         # ----------- 2 level subset block -regimen level dropouts ------------
         frame = self.null_handlers.handle_nan_in_condition(frame)
@@ -646,23 +649,19 @@ class Preprocessor:
         frame = self.regimen_handler.filter_imbalanced(frame, group_keys)
         frame = self.regimen_handler.filter_rt(frame)
         self.pattern_handlers.log_indefinite_cycle_length(frame, fields)
+
         # ----------- 3 - level subset block -variant level drouputs ------------
         checkpoint_df = self.variant_handler.create_checkopoint_frame(frame, group_keys) # safeguard
-        print(checkpoint_df.shape, frame.shape, 'pointer')
         single_df, multi_df = self.variant_handler.handle_partial_variants(frame, group_keys)
-        print(single_df.shape, multi_df.shape)
         cleaned_df, invalid_df_1 = self.pattern_handlers.all_days_pattern_handler(single_df, group_keys)
-        print(cleaned_df.shape, invalid_df_1.shape)
         # cleaned_df, invalid_df_2 = self.pattern_handlers.from_to_by_pattern_handler(valid_df, group_keys)
         
         # # ----------- 4 - rejoin filtered -----------
         funny_df = self.sumstats.concat_with_overlap_diagonstics(subsets=[("invalid_1", invalid_df_1), ("multi", multi_df)], group_keys=group_keys)
         # ------------ 5 - logs + reports -----------
         self.sumstats.log_summary(cleaned_df, funny_df, checkpoint_df, group_keys)
-        self.reporter.resolve(cleaned_df, "preproc_cleaned", pattern="Complete", field="-", status="H")
+        self.reporter.resolve(cleaned_df, "preproc_cleaned", pattern="COMPLETE", field="-", status="H")
         # ---- << final frame >> ----
-        print(cleaned_df.shape)
-        print(1/0)
         self.processed = cleaned_df.clone()
         return self
 

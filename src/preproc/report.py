@@ -18,13 +18,13 @@ class Reporter:
             "pattern_col" : "Pattern"
         }
         self.enc = {
-            "r" : "regimen","rc" : "regimenCUI", "vc" : "variantCUI","v" : "variant",
+            "r" : "regimen","rc" : "regimenCUI", "vc" : "variantCUI","v" : "variant",'co':"component",
             "c" : "condition","cc" : "conditionCUI", "ad" : "allDays", "lb" : "cycleLengthLB",
              "ub" : "cycleLengthUB", "unit" : "cycleLengthUnit", "ts" : "timingSequence",
              "sn":"stepNumber", 'cr': "componentRole"
             # ... 
         }
-        self.decode = lambda x: re.sub(r"\{.*?\}", self._replace_match, x)
+        self.decode = lambda x: re.sub(r"\{(.*?)\}", self._replace_match, x)
         self.add = {
             "H" : "HANDLED",     # kept as is
             "P" : "PATCHED",     # kept with a temporary fix
@@ -34,7 +34,7 @@ class Reporter:
         os.makedirs(self.output, exist_ok=True)
 
     def _replace_match(self, match):
-        key = match.group(0)  
+        key = match.group(1)  
         return self.enc.get(key, key)  
 
     def to_tsv(self, frame, file_name):
@@ -65,35 +65,6 @@ def group_adapt_pl(frame):
         pl.lit(regimen_cui_nunique).alias("regimen_cui_nunique")
     ])
 
-def group_adapt(df):
-    variant_cui_nunique = df[["regimen_cui", "variant_cui"]].drop_duplicates().shape[0]
-    regimen_cui_nunique = df["regimen_cui"].nunique()
-
-    df["variant_cui_nunique"] = variant_cui_nunique
-    df["regimen_cui_nunique"] = regimen_cui_nunique
-
-    return df
-
-def get_sum(df):
-    total = len(df)
-    print(df.columns)
-
-    status_counts = (
-        df["Status"]
-        .value_counts()
-        .rename_axis("Status")
-        .reset_index(name="count")
-    )
-    status_counts["perc"] = round((status_counts["count"] / total) * 100, 2)
-    status_counts["Status_initial"] = status_counts["Status"].str[0]
-
-    # Add columns back to df
-    for _, row in status_counts.iterrows():
-        col_name = f"Status_{row['Status_initial']}_perc"
-        df[col_name] = row["perc"]
-
-    return df
-
 def get_sum_pl(frame):
     total = frame.height
 
@@ -114,6 +85,52 @@ def get_sum_pl(frame):
 
     return frame
 
+def group_adapt(df):
+    variant_cui_nunique = df[["regimen_cui", "variant_cui"]].drop_duplicates().shape[0]
+    regimen_cui_nunique = df["regimen_cui"].nunique()
+
+    df["variant_cui_nunique"] = variant_cui_nunique
+    df["regimen_cui_nunique"] = regimen_cui_nunique
+
+    return df
+
+def get_sum(df):
+    expected_statuses = ["H", "P", "N"]
+    # Step 1: Deduplicate variant-regimen combinations
+    dedup = df[["regimen_cui", "variant_cui", "Status"]].drop_duplicates()
+    # Step 2: Extract status initial
+    dedup["Status_initial"] = dedup["Status"].str[0]
+
+    # Step 3: Count how many variants per status per regimen
+    counts = (
+        dedup.groupby(["regimen_cui", "Status_initial"])
+        .size()
+        .unstack(fill_value=0)
+        .rename(columns=lambda s: f"Status_{s}_count")
+    )
+
+    # Step 4: Compute total variants per regimen_cui
+    counts["total"] = counts.sum(axis=1)
+
+    # Step 5: Convert counts to percentages
+    for s in expected_statuses:
+        col = f"Status_{s}_count"
+        perc_col = f"Status_{s}_perc"
+        if col not in counts.columns:
+            counts[col] = 0
+        counts[perc_col] = round((counts[col] / counts["total"]) * 100, 2)
+
+    # Step 6: Join back to original dataframe on regimen_cui
+    out = df.merge(
+        counts[[f"Status_{s}_perc" for s in expected_statuses]].reset_index(),
+        on="regimen_cui",
+        how="left"
+    )
+
+    return out
+
+
+
 
 ### ////////////////////////////////////////////////////////////////////////////////////////
 ### publisher functions
@@ -130,15 +147,38 @@ def apply_operations(frame, schema, adapters=[]):
 def load(frame_path):
     return pd.read_csv(frame_path, sep='\t', index_col=False, low_memory=False)
 
-def write_frame_to_excel_sheet(path, frame, sheet_name):
-    if os.path.exists(path): # Dev note: default cleanup in case xlsx corrupted 
-        os.remove(path)
-    try:
-        with pd.ExcelWriter(path, engine='openpyxl', mode='a', if_sheet_exists='overlay') as writer:
-            frame.to_excel(writer, sheet_name=sheet_name, index=False, header=False)
-    except FileNotFoundError:
+
+from openpyxl import load_workbook
+from pathlib import Path
+import pandas as pd
+
+def write_frame_to_excel_sheet(path, frame, sheet_name, headers=True):
+    path = Path(path)
+
+    # If file doesn't exist, write with header
+    if not path.exists():
         with pd.ExcelWriter(path, engine='openpyxl') as writer:
-            frame.to_excel(writer, sheet_name=sheet_name, index=False)
+            frame.to_excel(writer, sheet_name=sheet_name, index=False, header=headers)
+        return
+
+    # Load existing workbook and determine startrow
+    book = load_workbook(path)
+    startrow = book[sheet_name].max_row if sheet_name in book.sheetnames else 0
+
+    # Reopen writer without assigning writer.book manually
+    with pd.ExcelWriter(path, engine='openpyxl', mode='a', if_sheet_exists='overlay') as writer:
+        # Ensure correct worksheet context
+        if sheet_name in writer.sheets:
+            writer.sheets[sheet_name] = book[sheet_name]
+
+        frame.to_excel(
+            writer,
+            sheet_name=sheet_name,
+            index=False,
+            header=(headers if startrow == 0 else False),
+            startrow=(startrow if not headers else 0)
+        )
+
 
 def build_reports(sheets, report_tables_path: str, output_dir: str):
     report_tables_path = Path(report_tables_path)
@@ -148,6 +188,9 @@ def build_reports(sheets, report_tables_path: str, output_dir: str):
     out_file = output_dir / "reports.xlsx"
     sheets = json.load(open(sheets, "r"))['sheets']
     
+    if out_file.exists():# Dev note: default cleanup in case xlsx corrupted 
+        os.remove(out_file)
+
     print("[INFO] Sheets processed:")
     for sheet in sheets:
         print(sheet)
@@ -159,9 +202,8 @@ def build_reports(sheets, report_tables_path: str, output_dir: str):
         headers_df = pd.DataFrame(columns=[*schema.values()])
         write_frame_to_excel_sheet(out_file, headers_df, sheet_name)
 
-        for table in report_tables_path.glob(".resolved.tsv"):
+        for table in report_tables_path.glob("*.resolved.tsv"):
             frame = load(table)
             frame = apply_operations(frame, schema, adapters)
             frame = frame[headers_df.columns].drop_duplicates()
-            write_frame_to_excel_sheet(out_file, frame, sheet_name)
-     
+            write_frame_to_excel_sheet(out_file, frame, sheet_name, headers=False)
