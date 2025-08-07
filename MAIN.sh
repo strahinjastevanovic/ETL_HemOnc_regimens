@@ -41,6 +41,7 @@ SUPP_FILE="${REF_DIR}/blacklist.json"
 REGIMEN_TSV="${WORKDIR}/regimens.tsv"
 REGIMEN_TSV_FULL="${WORKDIR}/regimens_full.tsv"
 LOGS="${WORKDIR}/logs"
+SHEET_CONFIG="${REF_DIR}/sheets_config.json"
 
 echo -e "\n%%% Starting ETL... %%%\n"
 echo -e "%%%\n\nHemOnc Version:\n ${DESCRIPTION} \n\n%%%"
@@ -63,14 +64,13 @@ if __name__ == "__main__":
     main(credentials, "${FILES_ROOT}/${SIGS_FILE}", "${WORKDIR}/concept_conditions.csv", "${WORKDIR}/sigs_w_conditions.csv", "${LOGS}")
 EOF
 
-
 echo -e "\n%%% Pre-processing... %%%\n"
 python3 - <<EOF
 import sys
 sys.path.insert(0, "${SRC_DIR}")
 from preproc import preprocessing
 if __name__ == "__main__":
-    preprocessing("${WORKDIR}/sigs_w_conditions.csv", "${WORKDIR}", "${LOGS}", "${SUPP_FILE}")
+    preprocessing("${WORKDIR}/sigs_w_conditions.csv", "${WORKDIR}", "${LOGS}", "${SUPP_FILE}", "${SHEET_CONFIG}")
 EOF
 
 echo -e "\n%%% Processing SIGs... %%%\n"
@@ -105,7 +105,7 @@ regimengroups <- read.delim("${WORKDIR}/regimengroups.tsv", stringsAsFactors = F
 save(regimengroups, file = "${WORKDIR}/regimengroups.rda")
 EOF
 
-echo -e "\n%%% Writing Validation report... %%%\n"
+echo -e "\n%%% Running Validation... %%%\n"
 python3 "${SRC_DIR}/validate.py" "${WORKDIR}" "${REGIMEN_TSV_FULL}"
 
 echo -e "\n%%% Done. Outputs saved in: $WORKDIR %%%\n"

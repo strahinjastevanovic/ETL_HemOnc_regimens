@@ -1,0 +1,8 @@
+[flake8]
+max-line-length = 100
+ignore = 
+    W503,  # line break before binary operator (PEP 8 conflict)
+    E203,  # whitespace before ':' (for compatibility with Black)
+select = B,C,E,F,W,T4,B9
+per-file-ignores =
+    __init__.py: F401  # allow unused imports in __init__.py

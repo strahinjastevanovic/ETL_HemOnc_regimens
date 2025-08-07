@@ -118,3 +118,4 @@ zstd
 python-dotenv
 sqlalchemy
 psycopg2
+flake8
