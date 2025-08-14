@@ -86,11 +86,26 @@ def get_sum_pl(frame):
     return frame
 
 def group_adapt(df):
-    variant_cui_nunique = df[["regimen_cui", "variant_cui"]].drop_duplicates().shape[0]
+    # Compute global unique count of regimen_cui
     regimen_cui_nunique = df["regimen_cui"].nunique()
-
-    df["variant_cui_nunique"] = variant_cui_nunique
     df["regimen_cui_nunique"] = regimen_cui_nunique
+    df["regimen_cui_nunique_sum"] = regimen_cui_nunique # symmetry
+
+    # Compute per-regimen unique variant count
+    per_regimen_variant_counts = (
+        df[["regimen_cui", "variant_cui"]]
+        .drop_duplicates()
+        .groupby("regimen_cui")
+        .size()
+        .reset_index(name="variant_cui_nunique")
+    )
+
+    # Merge per-regimen variant counts back into main df
+    df = df.merge(per_regimen_variant_counts, on="regimen_cui", how="left")
+
+    # Compute sum of variant counts across all regimens
+    variant_cui_nunique_sum = per_regimen_variant_counts["variant_cui_nunique"].sum()
+    df["variant_cui_nunique_sum"] = variant_cui_nunique_sum
 
     return df
 

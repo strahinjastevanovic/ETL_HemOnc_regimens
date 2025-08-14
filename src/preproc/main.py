@@ -90,7 +90,7 @@ class NullValueHandlers:
         null_sig_df = frame.join(variant_with_nulls, on=group_keys, how="inner")
 
         self.logger.info(f"[REPORT] Variants with NULLs in essentials — count: {variant_with_nulls.height}")
-        self.reporter.resolve(null_sig_df, "null_sig", pattern="sig-related fields can not be empty.", field="{allDays}, {lb}, {ub}, {unit}, {ts}", status="N")
+        self.reporter.resolve(null_sig_df, "null_sig", pattern="sig-related fields can not be empty. Thes fields are {allDays}, {lb}, {ub}, {unit}, {ts}", field="{allDays}, {lb}, {ub}, {unit}, {ts}", status="N")
 
         # Drop all rows from affected variants
         frame = frame.join(variant_with_nulls, on=group_keys, how="anti").drop("has_null_in_sig")
@@ -330,8 +330,8 @@ class VariantHandler:
         multi_part_df = s.filter(pl.col("sig_type") == "Multi-part Sig") 
         single_part_df = s.filter(pl.col("sig_type") == "Single-part Sig")
 
-        self.reporter.to_tsv(multi_part_df, "multi_part_sigs")
-        self.reporter.to_tsv(single_part_df, "single_part_sigs")
+        self.reporter.resolve(multi_part_df, "multi_part_sigs", pattern="Sig entry contains multi step variants", field="step_number", status="N")
+        self.reporter.resolve(single_part_df, "single_part_sigs", pattern="Sig with only single step variants. Not idiosyncratic", field="step_number", status="H")
 
         # cleaning
         single_part_df = single_part_df.drop("sig_type")  
@@ -528,7 +528,7 @@ class SupplementaryHandler:
             dropped.append(subset)
 
             dropped_components_count = subset.select("component").n_unique()
-            self.reporter.resolve(subset, name, pattern="Filtered component by role.", field="{co}, {cr}", status="N")
+            self.reporter.resolve(subset, name, pattern=f"Filtered component by role - {value}.", field="{co}, {cr}", status="N")
             self.logger.info(
                 f"[REPORT] Removed supplementary records ({name}): "
                 f"{round(subset.shape[0] / frame.shape[0], 2)}% - "
@@ -660,7 +660,7 @@ class Preprocessor:
         funny_df = self.sumstats.concat_with_overlap_diagonstics(subsets=[("invalid_1", invalid_df_1), ("multi", multi_df)], group_keys=group_keys)
         # ------------ 5 - logs + reports -----------
         self.sumstats.log_summary(cleaned_df, funny_df, checkpoint_df, group_keys)
-        self.reporter.resolve(cleaned_df, "preproc_cleaned", pattern="COMPLETE", field="-", status="H")
+        self.reporter.resolve(cleaned_df, "preproc_cleaned", pattern="No idiosyncracy. Clean", field="-", status="H")
         # ---- << final frame >> ----
         self.processed = cleaned_df.clone()
         return self

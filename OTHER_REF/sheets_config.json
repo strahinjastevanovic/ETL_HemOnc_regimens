@@ -4,8 +4,8 @@
         "name":"Idiosyncracies",
         "headers": {
             "Pattern" : "Idiosyncracy description",
-            "variant_cui_nunique" : "# of variants affected",
-            "regimen_cui_nunique" : "# regimens affected"
+            "variant_cui_nunique_sum" : "# of variants affected",
+            "regimen_cui_nunique_sum" : "# regimens affected"
             }
         },
         {
@@ -32,6 +32,7 @@
         {
         "name" :"SummaryStats",
         "headers" : {
+            "Pattern": "pattern",
             "Status_H_perc" : "Handled %",
             "Status_P_perc" : "Patched %",
             "Status_N_perc" : "Not Handled %"
