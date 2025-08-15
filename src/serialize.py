@@ -1,5 +1,6 @@
 import pandas as pd
 import random
+from preproc.log import Logger
 
 def generate_reg_group(regimen_tsv, ref_reggroups, workdir="."):
     """
@@ -47,16 +48,33 @@ def generate_reg_group(regimen_tsv, ref_reggroups, workdir="."):
     updated_df.to_csv(f"{workdir}/regimengroups.tsv", sep='\t', index=False)
     return updated_df
 
+def get_ref_columns(ref_validdrugs):
+    col = pd.read_csv(ref_validdrugs, sep="\t", nrows=0).columns.tolist()
+    scol = sorted(col)
+    return scol, col
+
+VALID_DRUGS_RELMAP = {
+        "name":"concept_name",
+        "concept_id":"concept_id",
+        "Manual": "concept_id",
+        "concept_me":"concept_name",
+        "valid_concept_id": "valid_concept_id",
+        "domain_id": "domain_id",
+        "concept_class_id" : "concept_class_id",
+        "Manual_Req": "invalid_reason"
+    }
 
 
-def generate_valid_drugs(regimen_tsv, ref_validdrugs, workdir="."):
+
+def generate_valid_drugs(regimen_tsv, validdrugs_query, workdir="."):
     """
-    Creates a valid drugs dataset by cross-referencing existing components 
-    in the ETL process with a reference file.
+    Creates a valid drugs dataset by remaping query_table to output valid drugs table.
+    But also checks whether each queried drug exist in regimen_tsv (full format)
+    and logs incosistancies. 
 
     Parameters:
-    etl_object (object): The ETL object containing data tables.
-    ref_validdrugs (str): Path to the reference valid drugs TSV file.
+    regimen_tsv (str): Path to final regimen table TSV file.
+    query_table (str): Path to Valid drugs vocab query
 
     Returns:
     pd.DataFrame: Updated valid drugs dataframe.
@@ -64,79 +82,36 @@ def generate_valid_drugs(regimen_tsv, ref_validdrugs, workdir="."):
 
     # Load the final component table
     fin = pd.read_csv(regimen_tsv, sep='\t')
-    components = fin['component'].str.lower().unique().tolist()
+    components_lower = fin['component'].str.lower().unique().tolist()
     
-    # Read TSV as raw text and manually clean extra tabs
-    with open(ref_validdrugs, "r", encoding="utf-8") as f:
-        lines = [line.strip().split("\t")[:8] for line in f][1:]  # Truncate extra columns
+    vd_query = pd.read_csv(validdrugs_query)
+    vd_components_lower = vd_query['concept_name'].str.lower().unique().tolist()
+
+    # log discrepancies
+    sc = set(components_lower)
+    vd = set(vd_components_lower)
+
+    logger     = Logger(f"{workdir}/logs", filename="serialize.log", )
+    logger.info(f"\n[INFO] components loaded from HemOnc: {len(sc)}\n"
+          f"[INFO] components loaded from athena: {len(vd)}\n"
+          f"[INFO] shared: {len(vd.intersection(sc))}\n"
+          f"[INFO] in HemOnc: {len(vd.difference(sc))}\n"
+          f"[INFO] in Athena: {len(sc.difference(vd))}\n"
+          )
     
-    # Convert cleaned list to DataFrame
-    ref = pd.DataFrame(lines)
+    # remap
+    for new_col, src_col in VALID_DRUGS_RELMAP.items():
+        if new_col:
+            vd_query[new_col] = vd_query[src_col].values
+    
+    out_cols = list(filter(None, VALID_DRUGS_RELMAP.keys()))
 
-    # Ensure the dataframe has exactly 8 columns
-    expected_columns = ["name", "concept_id", "Manual", "concept_me", 
-                        "valid_concept_id", "domain_id", "concept_class_id", "Manual_Req"]
+    if not set(out_cols).issubset(vd_query.columns):
+        raise ValueError(f"Missing required columns in reference file: {set(out_cols) - set(vd_query.columns)}")
 
-    # Fix rows with more than 8 columns (truncate extra columns)
-    ref = ref.iloc[:, :8]
-
-    # Fix rows with less than 8 columns (fill missing values with None)
-    ref = ref.replace("", pd.NA)
-    ref = ref.fillna(pd.NA)
-
-    # Assign proper column names
-    ref.columns = expected_columns
-
-
-    # Ensure column names are standardized
-    required_columns = ["name", "concept_id", "Manual", "concept_me", 
-                        "valid_concept_id", "domain_id", "concept_class_id", "Manual_Req"]
-
-    if not set(required_columns).issubset(ref.columns):
-        raise ValueError(f"Missing required columns in reference file: {set(required_columns) - set(ref.columns)}")
-
-    # Normalize case for comparison &&
-    # Identify known drugs already in reference
-    known_df = ref[ref['name'].str.lower().isin(components)]
-    print(f"Found: {known_df.shape}, Reference: {ref.shape}")
-
-    # Find missing drugs to be added
-    to_add = set(components) - set(known_df['name'].unique())
-
-    # If there are new drugs, generate entries
-    new_entries = []
-    for i, component in enumerate(to_add, 1):
-        name = component.strip().title()
-        concept_id = pd.to_numeric(known_df['concept_id'], errors='coerce').max() + i if not known_df.empty else i
-
-
-        manual = concept_id  # Same as concept_id
-        concept_me = name  # Copy from name column
-        valid_concept_id = pd.to_numeric(known_df['valid_concept_id'], errors='coerce').max() + i if not known_df.empty else i
-        domain_id = "Drug"
-        concept_class_id = "Ingredient"
-        manual_req = "Yes"
-
-        new_entries.append({
-            "name": name,
-            "concept_id": concept_id,
-            "Manual": manual,
-            "concept_me": concept_me,
-            "valid_concept_id": valid_concept_id,
-            "domain_id": domain_id,
-            "concept_class_id": concept_class_id,
-            "Manual_Req": manual_req
-        })
-
-    # Convert to DataFrame and concatenate
-    if new_entries:
-        new_df = pd.DataFrame(new_entries)
-        updated_df = pd.concat([ref, new_df], ignore_index=True)
-    else:
-        updated_df = ref
-
-    updated_df.to_csv(f"{workdir}/validdrugs.tsv", sep='\t', index=False)
-    return updated_df
+    vd_query = vd_query[out_cols]
+    vd_query.to_csv(f"{workdir}/validdrugs.tsv", sep='\t', index=False)
+    return vd_query
 
 
 

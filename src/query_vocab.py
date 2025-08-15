@@ -3,6 +3,8 @@ from sqlalchemy import create_engine
 import logging 
 import os
 
+from queries.vocab_query import query_valid_drugs as drugs_sql, query_conditions as condition_sql
+
 def get_logger(log_path: str) -> logging.Logger:
     os.makedirs(os.path.dirname(log_path), exist_ok=True)  
 
@@ -32,58 +34,17 @@ def log_missing(df, col1, logger):
    logger.info(f'Query Size: {df[col1].notna().sum()} - Coverage: {round(df.c1_name.notna().sum() / len(df) * 100, 2)}%')
    logger.info(f'Missing {df[col1].isna().sum()} regimen to condition records.')
 
-def main(
-    credentials = {
-      "username":"username",
-      "password":"password",
-      "host":"host",
-      "port":"port",
-      "db":"db"
-    },
-    inupt_file = "INPUT_FILES_HEMONC/sigs.csv",
-    vocab_file = "INPUT_FILES_HEMONC/sigs_conditions.csv", 
-    output_file="INPUT_FILES_HEMONC/sigs_w_conditions.csv",
-    log_dir = None,
-   ):
-  
+def log_shape(df, tag, logger):
+   logger.info(f"Shape {tag}: {df.shape}")
+
+def run_query_conditions(engine, vocab_file, input_file, log_dir, output_file):
   if os.path.exists(output_file):
       return 1
-  
-  engine = create_engine(f"postgresql://{credentials['username']}:{credentials['password']}@{credentials['host']}:{credentials['port']}/{credentials['db']}")
-
-  query = """
-  SELECT DISTINCT ON (c1.concept_id, c2.concept_id)
-    c1.concept_id           as c1_id, -- regimen_cui in OMOP
-    c1.concept_code         as c1_code, -- regimen_cui in sigs
-    c1.concept_name         as c1_name, -- regimen in sigs
-    c1.domain_id            as c1_domain, 
-    c1.concept_class_id     as c1_class,
-
-    c2.concept_id           as c2_id, -- condition_cui in OMOP 
-    c2.concept_code         as c2_code, -- condition_cui in sigs
-    c2.concept_name         as c2_name, -- condition in sigs 
-    c2.domain_id            as c2_domain,
-    c2.concept_class_id     as c2_class
-
-  from devv5.concept c1
-  join devv5.concept_relationship r 
-    on r.concept_id_1 = c1.concept_id and r.invalid_reason is null
-  join devv5.concept c2 
-    on c2.concept_id = r.concept_id_2
-
-  where c1.vocabulary_id = 'HemOnc'
-    and (
-      (c2.concept_class_id = 'Condition' or c2.domain_id = 'Condition')
-      and
-      (c1.domain_id = 'Regimen' or c1.concept_class_id = 'Regimen')
-    )
-  -- )
-  """
-  df = pd.read_sql(query, engine)
+  df = pd.read_sql(condition_sql, engine)
   df.to_csv(vocab_file, index=False)
 
   # read sigs
-  sg = pd.read_csv(inupt_file, low_memory=False)
+  sg = pd.read_csv(input_file, low_memory=False)
 
   print(f"[InputSigsShape] {sg.shape}")
 
@@ -118,3 +79,41 @@ def main(
 
   print(f"[ConditionAdded] {sg.shape}")
   sg.to_csv(output_file, index=False)
+
+
+def run_query_valid_drugs(engine, output_file, input_file, log_dir):
+  if os.path.exists(output_file):
+      return 1
+  df = pd.read_sql(drugs_sql, engine)
+  df.to_csv(output_file, index=False)
+  
+  #### LOG + CLEAN
+  logger = get_logger(f"{log_dir}/query.log")
+  log_shape(df, "valid drugs query", logger)
+
+def main(
+    credentials = {
+      "username":"username",
+      "password":"password",
+      "host":"host",
+      "port":"port",
+      "db":"db"
+    },
+    input_file = "INPUT_FILES_HEMONC/sigs.csv",
+    vocab_file_condition = "INPUT_FILES_HEMONC/sigs_conditions.csv", 
+    vocab_file_drugs = "INPUT_FILES_HEMONC/sigs_drugs.csv", 
+    output_file_conditions ="INPUT_FILES_HEMONC/sigs_w_conditions.csv",
+    log_dir = None,
+   ):
+  #  main(credentials,\
+  #   "${FILES_ROOT}/${SIGS_FILE}",\
+  #   "${WORKDIR}/condition_concepts.csv",\
+  #   "${WORKDIR}/drug_concepts.csv",\
+  #   "${WORKDIR}/sigs_w_conditions.csv",\
+  #   "${LOGS}")
+  
+  engine = create_engine(f"postgresql://{credentials['username']}:{credentials['password']}@{credentials['host']}:{credentials['port']}/{credentials['db']}")
+
+  run_query_conditions(engine, vocab_file_condition, input_file, log_dir, output_file_conditions)
+
+  run_query_valid_drugs(engine, vocab_file_drugs, input_file, log_dir)
