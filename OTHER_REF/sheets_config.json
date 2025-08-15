@@ -22,6 +22,8 @@
         {
         "name": "VariantLog",
         "headers": {
+            "regimen": "regimen",
+            "regimen_cui" : "regimen CUI",
             "variant":  "variant",
             "variant_cui": "variant CUI",
             "Status":   "status", 

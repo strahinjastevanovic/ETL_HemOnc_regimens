@@ -7,24 +7,16 @@
 
 # output: sigs_conditions.csv ( optional: total number sumstats )
 
-import pandas as pd
-from sqlalchemy import create_engine
-import matplotlib.pyplot as plt
-import numpy as np
-
-
-engine = create_engine("postgresql://username:password@host:port/postgres")
-
-
-query = """
+query_conditions = """
 SELECT DISTINCT ON (c1.concept_id, c2.concept_id)
-  c1.concept_id           as c1_id, -- regimen_cui in sigs
+  c1.concept_id           as c1_id, -- regimen_cui in OMOP
   c1.concept_code         as c1_code, -- regimen_cui in sigs
   c1.concept_name         as c1_name, -- regimen in sigs
   c1.domain_id            as c1_domain, 
   c1.concept_class_id     as c1_class,
 
-  c2.concept_id           as c2_id, -- condition_cui in sigs 
+  c2.concept_id           as c2_id, -- condition_cui in OMOP 
+  c2.concept_code         as c2_code, -- condition_cui in sigs
   c2.concept_name         as c2_name, -- condition in sigs 
   c2.domain_id            as c2_domain,
   c2.concept_class_id     as c2_class
@@ -43,20 +35,25 @@ where c1.vocabulary_id = 'HemOnc'
   )
 -- )
 """
-df = pd.read_sql(query, engine)
-df.to_csv("INPUT_FILES_HEMONC/sigs_conditions.csv", index=False)
 
-# read sigs
-sg = pd.read_csv("INPUT_FILES_HEMONC/sigs.csv")
-
-sg.regimen_cui = sg.regimen_cui.astype(str)
-
-# merge by regimen_name as id does not match
-sg = sg.merge(
-    df[["c1_code", "c1_name", "c2_id", "c2_name"]],
-    left_on="regimen_cui",
-    right_on="c1_code",
-    how="left",
-)
-
-sg.to_csv("INPUT_FILES_HEMONC/sigs_w_conditions.csv", index=False)
+query_valid_drugs = """
+SELECT DISTINCT
+    c.concept_id,
+    c.concept_name,
+    c.concept_class_id,
+    c.vocabulary_id,
+    c.domain_id,
+    c.concept_code,
+    c.invalid_reason,
+    cr.concept_id_2 AS valid_concept_id
+FROM
+    devv5.concept c
+LEFT JOIN
+    devv5.concept_relationship cr
+    ON c.concept_id = cr.concept_id_1
+    AND cr.relationship_id = 'Maps to'
+WHERE
+    c.vocabulary_id = 'HemOnc'
+    AND c.domain_id = 'Drug'
+    AND cr.concept_id_2 IS NOT NULL;
+"""

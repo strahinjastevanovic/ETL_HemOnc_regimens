@@ -61,7 +61,13 @@ if __name__ == "__main__":
       "port":os.getenv('PORT'),
       "db":os.getenv('DB')
     }
-    main(credentials, "${FILES_ROOT}/${SIGS_FILE}", "${WORKDIR}/concept_conditions.csv", "${WORKDIR}/sigs_w_conditions.csv", "${LOGS}")
+
+    main(credentials,\
+    "${FILES_ROOT}/${SIGS_FILE}",\
+    "${WORKDIR}/condition_concepts.csv",\
+    "${WORKDIR}/drug_concepts.csv",\
+    "${WORKDIR}/sigs_w_conditions.csv",\
+    "${LOGS}")
 EOF
 
 echo -e "\n%%% Pre-processing... %%%\n"
@@ -90,7 +96,7 @@ sys.path.insert(0, "${SRC_DIR}")
 from serialize import generate_reg_group, generate_valid_drugs 
 if __name__ == "__main__":
     generate_reg_group("${REGIMEN_TSV_FULL}", "${REF_RGROUPS}", workdir="${WORKDIR}")
-    generate_valid_drugs("${REGIMEN_TSV_FULL}", "${REF_VALIDDRUGS}", workdir="${WORKDIR}")
+    generate_valid_drugs("${REGIMEN_TSV_FULL}", "${WORKDIR}/drug_concepts.csv", workdir="${WORKDIR}")
 EOF
 
 echo -e "\n%%% Converting TSVs to RDA... %%%\n"
