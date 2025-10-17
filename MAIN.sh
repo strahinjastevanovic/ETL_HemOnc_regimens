@@ -55,11 +55,11 @@ sys.path.insert(0, "${SRC_DIR}")
 from query_vocab import main
 if __name__ == "__main__":
     credentials = {
-      "username":os.getenv('USERNAME'),
-      "password":os.getenv('PASSWORD'),
-      "host":os.getenv('HOST'),
-      "port":os.getenv('PORT'),
-      "db":os.getenv('DB')
+      "username":os.getenv('DB_USER'),
+      "password":os.getenv('DB_PASSWORD'),
+      "host":os.getenv('DB_HOST'),
+      "port":os.getenv('DB_PORT'),
+      "db":os.getenv('DB_NAME')
     }
 
     main(credentials,\

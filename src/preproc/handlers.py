@@ -216,69 +216,6 @@ class VariantHandler:
         """Create checkpoint of variant groups (to verify nothing is lost)"""
         return frame.select(group_keys).unique()
 
-    # def handle_partial_variants(self, frame, group_keys):
-    #     """Logs variant and parts status"""
-
-    #     # Total variants and unique regimen-variant pairs
-    #     uniq = frame.select(group_keys).unique()
-    #     n_variants = uniq.height
-    #     print(f"Unique variants: {n_variants}")
-    #     regimen_variants = (
-    #         uniq.select(["regimen_cui", "variant_cui"])
-    #             .unique()
-    #             .group_by("regimen_cui")
-    #             .agg(pl.col("variant_cui").n_unique().alias("n_variant"))
-    #     )
-
-    #     self.reporter.to_tsv(regimen_variants, "regimen_variants_n_unique")
-
-    #     n_regimen_variants = (
-    #         regimen_variants
-    #             .select(pl.col("n_variant").sum())
-    #             .item()
-    #     )
-    #     print(f"n_regimen_variants: {n_regimen_variants}")
-    #     self.logger.info(f"[REPORT] Total number of variants: {n_variants} ({n_regimen_variants} unique)")
-
-    #     # Detect multipart
-    #     sig_types = (
-    #         frame.with_columns(pl.col("component").is_duplicated().over(group_keys).alias("dup"))
-    #             .group_by(group_keys)
-    #             .agg(pl.col("dup").any().alias("is_multi"))
-    #             .with_columns(pl.when("is_multi").then(pl.lit("Multi-part Sig")).otherwise(pl.lit("Single-part Sig")).alias("sig_type"))
-    #     )
-
-    #     s = frame.join(sig_types, on=group_keys, how="left")
-
-    #     # Counts
-    #     counts = (
-    #         s.group_by("sig_type")
-    #         .agg([
-    #             pl.count().alias("count"),
-    #             pl.col("regimen").n_unique().alias("n_regimens"),
-    #             pl.col("variant_cui").n_unique().alias("n_variants"),
-    #             pl.col("regimen").unique().alias("regimens")
-    #         ])
-    #     )
-
-    #     for row in counts.iter_rows(named=True):
-    #         self.logger.info(f"[REPORT] Number of total {row['sig_type']} variants: {row['count']} ({row['n_variants']} unique)")
-
-    #     assert counts["n_variants"].sum() == n_regimen_variants
-
-    #     multi_part_df  = s.filter(pl.col("sig_type") == "Multi-part Sig") 
-    #     print("MP shape", multi_part_df.shape)
-    #     multi_part_df = multi_part_df.drop("sig_type")
-        
-    #     single_part_df = s.filter(pl.col("sig_type") == "Single-part Sig")
-    #     print("SP shape", single_part_df.shape)
-    #     single_part_df = single_part_df.drop("sig_type")  
-
-    #     self.reporter.resolve(multi_part_df, "multi_part_sigs", pattern="Multi-part Sig record - vary by step number.", field="{vc} {sn}", status="N")
-    #     self.reporter.resolve(single_part_df, "single_part_sigs", pattern="Single-part Sig record", field="{vc} {sn}", status="H")
-
-    #     return single_part_df, multi_part_df
-
     def handle_partial_variants(self, frame, group_keys):
         """Logs variant and parts status"""
 
@@ -465,20 +402,21 @@ class SupplementaryHandler:
         blist = [l for subli in [s.split("(") for s in blist] for l in subli]
         return [s.strip(")").strip().lower() for s in blist]
 
-    def clean_by_blacklist(self, frame, supplementary=None):
+    def clean_by_blacklist(self, frame, supplementary=None, group_keys=None):
         """
-        Removes blacklisted components; 
-        Will drop variant_cui if all its components are blacklisted.
-        Return invalid - variant_cui droped, valid - passed after cleanup
-
-        Creates metaCondition - side effect TODO...
+        Removes blacklisted components.
+        Drops entire variant groups if any of their components are blacklisted.
+        Returns: valid (cleaned) frame.
         """
+        group_keys_loc = group_keys[1:]
 
         self.logger.info(f"Input shape: {frame.shape}")
+
         frame = frame.with_columns(
             pl.col("component").cast(str).map_elements(self.clean_text).alias("meta_component")
         )
-
+        
+        # Apply blacklist
         blacklist_set = set()
         if supplementary:
             bl_json = json.load(open(supplementary))
@@ -488,56 +426,154 @@ class SupplementaryHandler:
             pl.col("meta_component").is_in(blacklist_set).alias("is_blacklisted")
         )
 
-        # Count how many components are blacklisted
+        # CComponent-level logging
         if blacklist_set:
-            n_drop = frame.filter("is_blacklisted").height
-            dropped = frame.filter("is_blacklisted").select("component").unique().to_series().to_list()
-            self.logger.info(f"[REPORT] Dropped {n_drop} components from blacklist ({len(blacklist_set)} items).")
+            n_drop = frame.filter(pl.col("is_blacklisted")).height
+            dropped = frame.filter(pl.col("is_blacklisted")).select("component").unique().to_series().to_list()
+            # Report blacklisted component-level hits
+            self.logger.info(f"[REPORT] Dropped {n_drop} components from a blacklist with ({len(blacklist_set)} items).")
             for comp in dropped:
                 self.logger.info(f"[Lookup] DROPPED: {comp}")
         else:
             self.logger.info("No blacklist applied.")
 
-        # Drop blacklisted components
-        frame_clean = frame.filter(~pl.col("is_blacklisted"))
+        # Identify variant groups containing at least one blacklisted component
+        invalid_keys = (
+            frame.filter(pl.col("is_blacklisted"))
+                .select(group_keys_loc)
+                .unique()
+        )
 
-        # Determine dropped variant_cui group keys --- this block cleans entire groups
-        # valid_keys = frame_clean.select(["regimen_cui", "variant_cui"]).unique()
-        # invalid = frame.join(valid_keys, on=["regimen_cui", "variant_cui"], how="anti").drop(["is_blacklisted", "meta_component"])
-        
-        # This block removes only records...
-        valid = frame_clean.drop(["is_blacklisted", "meta_component"])
-        invalid = frame.filter(pl.col("is_blacklisted")).drop(["is_blacklisted", "meta_component"])
+        # Drop entire variant groups that have any blacklisted components
+        invalid = frame.join(invalid_keys, on=group_keys_loc, how="inner")
+        valid = frame.join(invalid_keys, on=group_keys_loc, how="anti")
 
+        # Reporting
         self.logger.info(f"Output shape: {valid.shape}")
-        self.reporter.resolve(invalid, "supplementary_dropped", pattern="Filtered item from a blacklist.", field="{c}", status="P")
-        
-        n_dropped = invalid.select(["regimen_cui", "variant_cui"]).unique().height
-        self.logger.info(f"[REPORT] Removed variants as supplementary - {n_dropped}")
-        
-        return valid
+        self.reporter.resolve(
+            invalid,
+            "supplementary_dropped",
+            pattern="Filtered item from a blacklist (variant contained blacklisted component).",
+            field="{c}",
+            status="N"
+        )
 
-    def clean_by_role(self, frame, field="component_role"):
-        dropped = []
+        n_dropped = invalid_keys.height
+        self.logger.info(f"[REPORT] Removed variants as supplementary - {n_dropped}")
+
+        # Cleanified
+        return valid.drop("is_blacklisted", "meta_component")
+
+    def clean_by_blacklist_regimen(self, frame: pl.DataFrame, supplementary: str = None, group_keys: list[str] = None) -> pl.DataFrame:
+        """
+        Removes blacklisted components. If any are found in the 'regimen' field (title-lowercased),
+        drops the entire group (defined by group_keys) if any component matches a blacklist regex.
+        Regex is checked using Polars str.search() operations.
+        Returns cleaned frame.
+        """
+        self.logger.info(f"Input shape: {frame.shape}")
+
+        # Normalize 'regimen' field: lowercase → titlecase
+        frame = frame.with_columns(
+            pl.col("regimen")
+            .cast(str)
+            .str.to_lowercase()
+            .alias("meta_regimen")
+        )
+
+        # Apply blacklist
+        blacklist_set = set()
+        if supplementary:
+            bl_json = json.load(open(supplementary))
+            blacklist_set = set(self.proc_blist_naive(bl_json.get("custom", [])))
+            blacklist_set = set([x.lower() for x in list(blacklist_set)])
+
+        if not blacklist_set:
+            self.logger.info("No blacklist patterns provided — skipping filtering.")
+            return frame.drop("meta_regimen")
+
+        # Build Polars-native OR-ed regex condition
+        condition = pl.lit(False)
+        for pat in blacklist_set:
+            word_boundary_pat = f"\\b{pat}\\b"
+            condition = condition | pl.col("meta_regimen").str.contains(word_boundary_pat, literal=False)
+
+        # Add blacklist flag
+        frame = frame.with_columns(
+            condition.alias("is_blacklisted")
+        )
+
+        # Drop groups if any item in them is blacklisted
+        if group_keys:
+            invalid_keys = (
+                frame.filter(pl.col("is_blacklisted"))
+                    .select(group_keys)
+                    .unique()
+            )
+            valid = frame.join(invalid_keys, on=group_keys, how="anti")
+            invalid = frame.join(invalid_keys, on=group_keys, how="inner")
+        else:
+            invalid = frame.filter(pl.col("is_blacklisted"))
+            valid = frame.filter(~pl.col("is_blacklisted"))
+            invalid_keys = invalid.select(group_keys or []).unique() if group_keys else invalid
+
+        # Reporting
+        self.logger.info(f"Output shape: {valid.shape}")
+        self.reporter.resolve(
+            invalid,
+            "supplementary_dropped_regimen_title",
+            pattern="Regimen name contains blacklisted component (regex matched).",
+            field="{r}",
+            status="N"
+        )
+
+        self.logger.info(f"[REPORT] Removed blacklisted groups: {invalid_keys.height}")
+
+        # Cleanified
+        return valid.drop("is_blacklisted", "meta_regimen")
+
+
+    def clean_by_role(self, frame: pl.DataFrame, group_keys: list[str], field: str = "component_role", ) -> pl.DataFrame:
+        dropped_groups = []
+        dropped_info = []
 
         for value, name in [
-            ('secondary systemic', 'component_role_secondary_systemic'),
-            ('locoregional', 'component_role_locoregional')
+            ("secondary systemic", "component_role_secondary_systemic"),
+            ("locoregional", "component_role_locoregional")
         ]:
+            # Find all variants containing this role
             subset = frame.filter(pl.col(field) == value)
-            dropped.append(subset)
 
-            dropped_components_count = subset.select("component").n_unique()
+            # Only keys (for grouping/removal)
+            subset_keys = subset.select(group_keys).unique()
+            dropped_groups.append(subset_keys)
+
+            # Reporting for this specific role
             self.reporter.resolve(subset, name, pattern=f"Filtered component by role - {value}.", field="{co}, {cr}", status="N")
-            self.logger.info(
-                f"[REPORT] Removed supplementary records ({name}): "
-                f"{round(subset.shape[0] / frame.shape[0], 2)}% - "
-                f"Components loss number: {dropped_components_count}"
-            )
+            # Collect for logging
+            dropped_info.append((value, subset.height))
 
-        all_dropped = pl.concat(dropped)
-        filtered = frame.join(all_dropped, on=frame.columns, how="anti")
+        # Merge all dropped groups
+        all_dropped = pl.concat(dropped_groups) if dropped_groups else pl.DataFrame(schema={k: pl.Utf8 for k in group_keys})
+        all_dropped = all_dropped.unique()
+
+        # Calculate summary stats
+        total_variants = frame.select(group_keys).unique().height
+        dropped_variants = all_dropped.height
+        ratio = round((dropped_variants / total_variants) * 100, 2) if total_variants else 0.0
+
+        # Log per-role and total
+        for value, count in dropped_info:
+            self.logger.info(f"[REPORT] Variants with '{value}' role: {count}")
+        self.logger.info(
+            f"[REPORT] Total dropped variants: {dropped_variants}/{total_variants} ({ratio}%) "
+            f"due to disallowed component roles."
+        )
+
+        # Exclude those variant groups
+        filtered = frame.join(all_dropped, on=group_keys, how="anti")
         return filtered
+
 
 class Sumstats:
     def __init__(self, logger:object):
@@ -638,8 +674,9 @@ class Preprocessor:
         supplementary_file = self.sf
 
         # ----------- 1 level subset block -component level dropouts, variants kept ------------
-        frame = self.supp_handler.clean_by_role(frame) 
-        frame = self.supp_handler.clean_by_blacklist(frame, supplementary_file) 
+        frame = self.supp_handler.clean_by_role(frame, group_keys) 
+        frame = self.supp_handler.clean_by_blacklist(frame, supplementary_file, group_keys) 
+        frame = self.supp_handler.clean_by_blacklist_regimen(frame, supplementary_file, group_keys)
 
         # ----------- 2 level subset block -regimen level dropouts ------------
         frame = self.null_handlers.handle_nan_in_condition(frame)

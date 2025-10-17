@@ -12,7 +12,7 @@ spec.loader.exec_module(preproc_runner)
 # Export from this package
 preprocessing = preproc_runner.preprocessing
 
-from .main import Preprocessor
+from .handlers import Preprocessor
 from .audit import *
 from .log import *
 from .report import *
