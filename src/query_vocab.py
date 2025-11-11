@@ -96,7 +96,7 @@ def main(
       "username":"username",
       "password":"password",
       "host":"host",
-      "port":"port",
+      # "port":"port",
       "db":"db"
     },
     input_file = "INPUT_FILES_HEMONC/sigs.csv",
@@ -105,14 +105,9 @@ def main(
     output_file_conditions ="INPUT_FILES_HEMONC/sigs_w_conditions.csv",
     log_dir = None,
    ):
-  #  main(credentials,\
-  #   "${FILES_ROOT}/${SIGS_FILE}",\
-  #   "${WORKDIR}/condition_concepts.csv",\
-  #   "${WORKDIR}/drug_concepts.csv",\
-  #   "${WORKDIR}/sigs_w_conditions.csv",\
-  #   "${LOGS}")
   
-  engine = create_engine(f"postgresql://{credentials['username']}:{credentials['password']}@{credentials['host']}:{credentials['port']}/{credentials['db']}")
+  # engine = create_engine(f"postgresql://{credentials['username']}:{credentials['password']}@{credentials['host']}:{credentials['port']}/{credentials['db']}")
+  engine = create_engine(f"postgresql://{credentials['username']}:{credentials['password']}@{credentials['host']}/{credentials['db']}")
 
   run_query_conditions(engine, vocab_file_condition, input_file, log_dir, output_file_conditions)
 

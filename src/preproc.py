@@ -1,4 +1,4 @@
-from preproc.handlers import Preprocessor
+from pipeline.main import Preprocessor
 
 def preprocessing(
     sigs_file=".",

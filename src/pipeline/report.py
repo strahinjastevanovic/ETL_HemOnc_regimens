@@ -8,6 +8,11 @@ import json
 
 
 ### ////////////////////////////////////////////////////////////////////////////////////////
+### file setup
+
+F_LABEL = "reported" 
+
+### ////////////////////////////////////////////////////////////////////////////////////////
 ### domain class 
 
 class Reporter:
@@ -40,7 +45,7 @@ class Reporter:
     def to_tsv(self, frame, file_name):
         frame.write_csv(f"{self.output}/{file_name}.tsv", separator="\t")
     
-    def resolve(self, frame, file_name, pattern=None, field=None, status=None):
+    def report(self, frame, file_name, pattern=None, field=None, status=None, flabel=None):
         if pattern and field and status:
             frame = frame.with_columns([
                 pl.lit(self.decode(pattern) ).alias("Pattern"),
@@ -50,7 +55,8 @@ class Reporter:
         else:
             raise TypeError(f"Please specify a value for the param:\nINPUT: pattern={pattern} ; field={field} ; status={status}. ")
 
-        frame.write_csv(f"{self.output}/{file_name}.resolved.tsv", separator="\t")
+        flabel = flabel if flabel != None else F_LABEL
+        frame.write_csv(f"{self.output}/{file_name}.{flabel}.tsv", separator="\t")
 
 
 ### ////////////////////////////////////////////////////////////////////////////////////////
@@ -217,7 +223,7 @@ def build_reports(sheets, report_tables_path: str, output_dir: str):
         headers_df = pd.DataFrame(columns=[*schema.values()])
         write_frame_to_excel_sheet(out_file, headers_df, sheet_name)
 
-        for table in report_tables_path.glob("*.resolved.tsv"):
+        for table in report_tables_path.glob(f"*.{F_LABEL}.tsv"):
             frame = load(table)
             frame = apply_operations(frame, schema, adapters)
             frame = frame[headers_df.columns].drop_duplicates()
