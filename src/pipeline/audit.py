@@ -4,6 +4,7 @@ from itertools import combinations
 import json
 import polars as pl 
 from tqdm import tqdm
+from collections import Counter
 
 class AuditColumnTypes:
     def __init__(self, log_dir, filename, default_file="s_frame.schema.json"):
@@ -39,14 +40,14 @@ class AuditColumnTypes:
             json.dump(schema, f, indent=2)
 
 
-class Sumstats:
+class Tracking:
     def __init__(self, logger:object):
         self.logger = logger
 
-    def concat_with_overlap_diagnostics(self, subsets:list, group_keys):
+    def concat_with_overlap_diagnostics(self, subsets:list, group_keys, remove_ovelaps=False):
         overlap = lambda *args: (
             lambda a, b, name: (
-                lambda o: self.logger.debug(f"[OVERLAP] {o.height} overlapping group_keys in {name}")
+                lambda o: self.logger.warning(f"[AUDIT] {o.height} overlapping group_keys in {name}")
                 if o.height > 0 else None
             )(a.select(group_keys).unique().join(b.select(group_keys).unique(), on=group_keys, how="inner"))
         )(*args)
@@ -64,39 +65,40 @@ class Sumstats:
         and compare to checkpoint frame (all_keys)
         against group_keys
         """
-        all_keys_regimens_unique = (
-            all_keys
-            .select(["regimen_cui", "variant_cui"])
-            .unique()  # filters duplicated variants
-            .group_by("regimen_cui")
-            .agg(pl.col("variant_cui").n_unique().alias("n_variant"))
-            .select(pl.col("n_variant").sum())
-            .item()
-        )
+        keys = ["regimen_cui", "variant_cui"]
 
-        standard_regimens_unique = ( 
-            standard
-            .select(["regimen_cui", "variant_cui"])
-            .unique() 
-            .group_by("regimen_cui")
-            .agg(pl.col("variant_cui").n_unique().alias("n_variant"))
-            .select(pl.col("n_variant").sum())
-            .item()
-        )
+        # shared_keys = (
+        #     standard.select(keys).unique()
+        #     .join(
+        #         funny.select(keys).unique(),
+        #         on=keys,
+        #         how="inner"
+        #     )
+        # )
 
-        funny_regimens_unique = ( 
-            funny
-            .select(["regimen_cui", "variant_cui"])
-            .unique()
-            .group_by("regimen_cui")
-            .agg(pl.col("variant_cui").n_unique().alias("n_variant"))
-            .select(pl.col("n_variant").sum())
+        # if shared_keys.height > 0:
+        #     self.logger.warning(f"[AUDIT] Dropping {shared_keys.height} overlapping (regimen, variant) keys from all sets")
+        #     self.logger.warning(f"[AUDIT] Shared keys in checkpoint: {all_keys.join(shared_keys, how="inner", on=keys).shape}")
+        #     self.logger.warning(f"[AUDIT] Shared keys in standard: {standard.join(shared_keys, how="inner", on=keys).shape}")
+        #     self.logger.warning(f"[AUDIT] Shared keys in funny: {funny.join(shared_keys, how="inner", on=keys).shape}")
+        #     standard = standard.join(   shared_keys, on=keys, how="anti")
+        #     funny    = funny.join(      shared_keys, on=keys, how="anti")
+        #     all_keys = all_keys.join(   shared_keys, on=keys, how="anti")
+
+        get_total_variants_of_all_regimens = lambda table: table.select(keys) \
+            .unique() \
+            .group_by("regimen_cui") \
+            .agg(pl.col("variant_cui").n_unique().alias("n_variant")) \
+            .select(pl.col("n_variant").sum()) \
             .item()
-        )
+
+        all_keys_sum = get_total_variants_of_all_regimens(all_keys)
+        standard_sum = get_total_variants_of_all_regimens(standard)
+        funny_sum    = get_total_variants_of_all_regimens(funny) 
         
         funny_unique = funny.select(group_keys).n_unique()
         
-        assert all_keys_regimens_unique == standard_regimens_unique + funny_regimens_unique, f"Mismatch in group splits! {all_keys_regimens_unique} != {standard_regimens_unique} + {funny_regimens_unique}"
+        assert all_keys_sum == standard_sum + funny_sum, f"Mismatch in group splits! {all_keys_sum} != {standard_sum} + {funny_sum}"
         
-        self.logger.info(f"[AUDIT] Number of vanilla variants: {standard.shape[0]} ({standard_regimens_unique} unique)")
-        self.logger.info(f"[AUDIT] Number of funny variants: {funny_unique} ({funny_regimens_unique} unique)")
+        self.logger.info(f"[AUDIT] Number of vanilla variants: {standard.shape[0]} ({standard_sum} unique)")
+        self.logger.info(f"[AUDIT] Number of funny variants: {funny_unique} ({funny_unique} unique)")

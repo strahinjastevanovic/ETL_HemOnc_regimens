@@ -9,8 +9,10 @@ class Resolver:
     def resolve_partial_variants(
         self,
         frame: pl.DataFrame, 
-        group_keys=['condition_cui', 'regimen_cui', 'variant_cui'],
+        group_keys=['condition_cui', 'regimen_cui', 'variant'],
         ):
+        group_keys = group_keys[:-1] + ['variant']
+
         resolved_groups = []
 
         for i, group_df in frame.group_by(group_keys, maintain_order=True):
@@ -19,15 +21,30 @@ class Resolver:
 
             # Group by component_cui within this group
             for component_val, component_df in group_df.group_by("component_cui", maintain_order=True):
-                unique_steps = component_df["step_number"].n_unique()
-                unique_timings = component_df["timing_sequence"].n_unique()
+                if component_df.height == 1:
+                        updated_rows.append(component_df)
+                        continue  # don't check conditions — nothing to compare
+                
+                # Group within component by timing_sequence
+                for timing_val, timing_df in component_df.group_by("timing_sequence", maintain_order=True):
+                    unique_steps = timing_df["step_number"].n_unique()
 
-                if unique_steps != 1 and unique_timings == 1:
-                    # Multiple steps, single timing → keep only first
-                    updated_rows.append(component_df[0])
-                elif unique_steps == 1 and unique_timings != 1:
-                    # Single step, multiple timings → keep all
-                    updated_rows.append(component_df)
+                    if unique_steps > 1:
+                        # Step numbers differ → drop duplicates, keep first
+                        updated_rows.append(timing_df[0])
+                    elif unique_steps == 1:
+                        # Same timing and same step_number for all rows
+                        step_val = timing_df["step_number"][0]
+                        if timing_df.height > 1:
+                            # Suspicious: exact duplicates
+                            self.logger.warning(f"[RESOLVE] Duplicate component rows — component_cui={component_val}, timing_sequence={timing_val}, step_number={step_val}")
+                            self.logger.debug(timing_df.select(["regimen", "variant_cui", "component_cui", "component", "timing_sequence", "step_number"]))
+                        updated_rows.append(timing_df)
+                
+                    else:
+                        base_cols = ['regimen', 'variant_cui', 'component_cui', 'timing_sequence', 'step_number']
+                        raise RuntimeError (f"Unhandled case: {component_df.select(base_cols)}")
+
 
             # Combine kept rows from this group
             if updated_rows:
@@ -49,8 +66,8 @@ class Resolver:
 
         join_cols = frame.columns
         dropped = frame.join(resolved, on=join_cols, how="anti")
-    
-        return resolved, dropped
+
+        return resolved
 
     @staticmethod
     def combine(table_list):

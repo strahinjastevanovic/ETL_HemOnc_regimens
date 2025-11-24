@@ -1,7 +1,7 @@
 from pipeline.log import Logger
 from pipeline.audit import (
     AuditColumnTypes,
-    Sumstats
+    Tracking
 )
 from pipeline.handlers import (
     Frame,
@@ -42,7 +42,7 @@ class Preprocessor:
         self.variant_handler     = VariantHandler(self.logger, self.reporter)
         self.pattern_handlers    = PatternHandlers(self.logger, self.reporter)
         self.supp_handler        = SupplementaryHandler(self.logger, self.reporter)
-        self.sumstats            = Sumstats(self.logger)
+        self.tracker             = Tracking(self.logger)
         self.resolver            = Resolver(self.logger, self.reporter)
         return self # enables chaining
 
@@ -75,34 +75,23 @@ class Preprocessor:
         # ----------- 3 - level subset block -variant level drouputs ------------
         checkpoint_df = self.variant_handler.create_checkopoint_frame(frame, group_keys) # safeguard
        
-            # ----------- 3.1 - parted -----------------
+        # ----------- 3.1 - parted -----------------
         single_df, multi_df    = self.variant_handler.handle_partial_variants(frame, group_keys)
-        mdf_resolved, mdf_drop = self.resolver.resolve_partial_variants(multi_df, group_keys)
+        mdf_resolved           = self.resolver.resolve_partial_variants(multi_df, group_keys)
         mixed_df               = self.resolver.combine([single_df, mdf_resolved])
 
-        print(f"{checkpoint_df.shape=}")
-        print(f"{single_df.shape=}")
-        print(f"{multi_df.shape=}")
-        print(f"{mdf_resolved.shape=}")
-        print(f"{mixed_df.shape=}")
-            # ----------- 3.2 - all days pattern handler -----------------
+        # ----------- 3.2 - all days pattern handler -----------------
         cleaned_df, invalid_df_1 = self.pattern_handlers.all_days_pattern_handler(mixed_df, group_keys)
 
-        print(f"{cleaned_df.shape=}")
-        print(f"{invalid_df_1.shape=}")
-        print(f"{mdf_drop.shape=}")
-
-        #  ----------- 4 - rejoin filtered -----------
+        #  ----------- 4 - Tracking filtered -----------
         funny_list = [
             ("invalid_1", invalid_df_1), 
-            ("multipart_drop", mdf_drop), 
         ]
-        funny_df = self.sumstats.concat_with_overlap_diagnostics(subsets=funny_list, group_keys=group_keys)
-        print(f"{funny_df.shape=}")
+        funny_df = self.tracker.concat_with_overlap_diagnostics(subsets=funny_list, group_keys=group_keys)
 
-        # ------------ 5 - logs + reports -----------
-        self.sumstats.log_summary(cleaned_df, funny_df, checkpoint_df, group_keys)
-        self.reporter.resolve(cleaned_df, "preproc_cleaned", pattern="No idiosyncracy. Clean", field="-", status="H")
+        # ------------ 5 - Summary report -----------
+        self.tracker.log_summary(cleaned_df, funny_df, checkpoint_df, group_keys)
+        self.reporter.report(cleaned_df, "preproc_cleaned", pattern="No idiosyncracy. Clean", field="-", status="H")
         
         # ---- << final frame >> ----
         self.processed = cleaned_df.clone()

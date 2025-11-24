@@ -22,7 +22,7 @@ class Handlers:
     
     # TODO: variants explosion
     # Unhandled 2,(+2) at the moment
-    # Unhandled (+) migth match group timing_sequence pattern
+    # Unhandled (+) might match group timing_sequence pattern
     @staticmethod
     def handle_timing_sequence(group: pl.DataFrame) -> pl.DataFrame:
         """
@@ -118,7 +118,7 @@ class RegStringHandler:
         
         Input: regimen_cui .. variant_cui .. condition_cui group
 
-        # Boildown hierarchy
+        # Boiled-down hierarchy
                    regimen -> variant > <portion?> -> components/cui -> step_number
                    step is repeated once or more -> 
                    sig anatomy (cycle_length_lb, cycle_length_ub, cycle_length_unit, timing_sequence) ->
@@ -137,11 +137,11 @@ class RegStringHandler:
             total_vector_len = get_last_cycle(group.select("timing_sequence").unique().to_series().to_list())
         except:
             print(group.select("timing_sequence").unique().to_series().to_list())
-            print(1/0)
+            raise ValueError("Processing total vector length is non-standard.")
 
         # Is there any group size greater then 1?
         # NOTE: current implementation does not support duplicate components per MAIN group
-        # Will be changes once variant_id allows multipart Sigs... TODO
+        # Will be changed once variant_cui allows multipart Sigs... TODO
         component_groups = group.group_by("component")
         counter_mix = 0
         for g_drug, df in component_groups:
@@ -151,7 +151,6 @@ class RegStringHandler:
         if counter_mix == 0:
             self.logger.debug(f"No duplicate components per group. Safe for processing w/o components groups")
 
-        
         component_vectors = {}
         component_error = False  # Track failure
         days_error = False  # Track failure
@@ -197,7 +196,7 @@ class RegStringHandler:
                     break
 
                 try:
-                    component_vector = build_component_vector(idays, length_in_days) 
+                    component_vector = build_component_vector(idays, length_in_days)
                 except Exception as e:
                     group_id = group.select(['condition', 'regimen', 'variant']).to_dicts()
                     self.logger.error(f"[SKIPPED COMPONENT] Cycle: {length} @ Unit: {cycle_length_unit} @ AllDays {allDays} @ i-AllDays {idays} @ Length in Days - {length_in_days}: [ERR] {e}")
