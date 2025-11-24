@@ -1,14 +1,16 @@
-# About
-ETL pipeline for creating regimens from HemOnc datasets (sigs table)
+# Regimens Assembler
+Pipeline for assembling regimens from HemOnc datasets (sigs table)
 
-You would need to setup postgress connection first using 
+For details checkout `assets/Assembler_main.md`
 
-See `ETL_Pipeline_Documentation.md`
+# Setup
 
-# Setup and Run
+0. You would need to setup postgres connection first to access Athena mirror resources.
 
-1. Use requirements.txt to create env.
+1. Use requirements.txt to setup env. Checkout `.env.template`.
 
-2. Create `.env` similar to `.env.template`.
+# Run pipeline
 
-3. `MAIN.sh -out output*`
+```
+./MAIN.sh -out output-assembled
+```
