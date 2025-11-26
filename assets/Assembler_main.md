@@ -1,4 +1,4 @@
-# Assembler Pipeline Documentation (Steps 1–5)
+# Regimen Assembler Pipeline  (Steps 1–5)
 
 
 ## Section Step 1 – Vocabularies Preprocessing
@@ -98,7 +98,7 @@ Then scans the timeline and for each active day, captures:
 * The first-poistion delta is calculated as 
 $$ \delta_0 = (n_{\text{cycles}} \cdot \text{days}) \;-\; \sum_{x=1}^{k} \delta_x $$
 k - number of subsequent events using 0-based indexing
-* Duplicates the string if only one entry is present (to capture gap between regimen cycle).
+* Duplicates the string if only one component is present (min-2-token rule).
 
 Final output is a semicolon-separated regimen string.
 ____
@@ -173,11 +173,11 @@ Cycle:        |  1  |  2  |  3  |  4  |  5  |
 
 Day Index:    | 0–20 |21–41|42–62|63–83|84–104|
 
-Matrix:       | A  | A  |        |        |        |        |        |        |        |        |        |
-              | B,C|    | B      | C      |        |        |        |        |        |        |        |
-              | A  | A  |        |        |        |        |        |        |        |        |        |
-              | B,C|    | B      | C      |        |        |        |        |        |        |        |
-              | A  | A  |        |        |        |        |        |        |        |        |        |
+Matrix:       | A  | A  |        |        |        |  x16   |
+              | B,C|    | B      | C      |        |  x16   |
+              | A  | A  |        |        |        |  x16   |
+              | B,C|    | B      | C      |        |  x16   |
+              | A  | A  |        |        |        |  x16   |
 ```
 
 The timeline is scanned from start to end. Every day with activity is marked:
