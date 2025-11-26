@@ -1,10 +1,6 @@
-from itertools import combinations
 import polars as pl
 import json
 import re
-from preproc.report import Reporter, build_reports
-from preproc.log import Logger
-from preproc.audit import AuditColumnTypes
 
 
 class Frame:
@@ -22,8 +18,6 @@ class Frame:
             null_values=["null", "NA", "NUB", "", "-"]
         )
         return frame
-
-        
 
 class NullValueHandlers:
     def __init__(self, logger:object, reporter:object):
@@ -60,7 +54,7 @@ class NullValueHandlers:
             pl.col("condition").fill_null("undefined")
         )
         self.logger.info(f"[REPORT] Filled {num_affected} (unique regimens: {num_unique_regimens} ) records with nulls in condition/condition_cui.")
-        self.reporter.resolve(null_rows, "null_condition", pattern="Missing {c} or out of sync with AthenaDB.", field="{cc}, {c}", status="P")
+        self.reporter.report(null_rows, "null_condition", pattern="Missing {c} or out of sync with AthenaDB.", field="{cc}, {c}", status="P")
         self.reporter.to_tsv(unique_regimens, "null_condition_regimens_unique")
         return frame
         
@@ -90,13 +84,12 @@ class NullValueHandlers:
         null_sig_df = frame.join(variant_with_nulls, on=group_keys, how="inner")
 
         self.logger.info(f"[REPORT] Variants with NULLs in essentials — count: {variant_with_nulls.height}")
-        self.reporter.resolve(null_sig_df, "null_sig", pattern="sig-related fields can not be empty. Thes fields are {allDays}, {lb}, {ub}, {unit}, {ts}", field="{allDays}, {lb}, {ub}, {unit}, {ts}", status="N")
+        self.reporter.report(null_sig_df, "null_sig", pattern="sig-related fields can not be empty. Thes fields are {allDays}, {lb}, {ub}, {unit}, {ts}", field="{allDays}, {lb}, {ub}, {unit}, {ts}", status="N")
 
         # Drop all rows from affected variants
         frame = frame.join(variant_with_nulls, on=group_keys, how="anti").drop("has_null_in_sig")
 
         return frame
-
 
 class RegimenHandler:
     def __init__(self, logger:object, reporter:object):
@@ -145,7 +138,7 @@ class RegimenHandler:
         # Log RT-containing stats
         rt_count    = rt_match.height
         self.logger.info(f"[REPORT] Regimens containing RT (spaced/parenthesized): {rt_count}")
-        self.reporter.resolve(filtered_rt, "radiotherapy_containing", "Radiotherapy used in {r}.", "{r}", "N")
+        self.reporter.report(filtered_rt, "radiotherapy_containing", "Radiotherapy used in {r}.", "{r}", "N")
         
         return frame
     
@@ -171,7 +164,7 @@ class RegimenHandler:
         frame_bad_height = frame_bad.select("regimen").unique().height
 
         self.logger.info(f"[REPORT] Removed regimens due to inconsistent components number cross variants: {frame_bad_height}")
-        self.reporter.resolve(frame_bad, report_name, "Variants missmatch in component number.", "{c} {cc} {vc}", "N")
+        self.reporter.report(frame_bad, report_name, "Variants missmatch in component number.", "{c} {cc} {vc}", "N")
 
         variant_component_counts = (
             frame_bad.group_by(group_keys)
@@ -205,7 +198,6 @@ class RegimenHandler:
         )
         self.reporter.to_tsv(variant_component_report, f"{report_name}_variants")
         return frame_good
-
 
 class VariantHandler:
     def __init__(self, logger:object, reporter:object):
@@ -267,8 +259,8 @@ class VariantHandler:
         multi_part_df = s.filter(pl.col("sig_type") == "Multi-part Sig") 
         single_part_df = s.filter(pl.col("sig_type") == "Single-part Sig")
 
-        self.reporter.resolve(multi_part_df, "multi_part_sigs", pattern="Sig entry contains multi step variants", field="step_number", status="N")
-        self.reporter.resolve(single_part_df, "single_part_sigs", pattern="Sig with only single step variants. Not idiosyncratic", field="step_number", status="H")
+        self.reporter.report(multi_part_df, "multi_part_sigs", pattern="Sig entry contains multi step variants", field="step_number", status="N")
+        self.reporter.report(single_part_df, "single_part_sigs", pattern="Sig with only single step variants. Not idiosyncratic", field="step_number", status="H")
 
         # cleaning
         single_part_df = single_part_df.drop("sig_type")  
@@ -298,7 +290,7 @@ class PatternHandlers:
         )
 
         cycle_length_unit_indefinite_df = frame.join(groups_with_indeterminate, on=group_keys, how="inner")
-        self.reporter.resolve(cycle_length_unit_indefinite_df, "cycle_length_unit_indefinite", pattern="Cycle length unit is indeterminate.", field="{unit}", status="P")
+        self.reporter.report(cycle_length_unit_indefinite_df, "cycle_length_unit_indefinite", pattern="Cycle length unit is indeterminate.", field="{unit}", status="P")
 
         cycle_length_unit_indefinite_regimens_unique = (
             frame
@@ -340,7 +332,7 @@ class PatternHandlers:
         invalid_groups_keys = invalid_groups.select(group_keys).unique().height
 
         self.logger.info(f"[REPORT] Number of variants with unhandled allDays pattern: {invalid_groups_keys}")
-        self.reporter.resolve(invalid_groups, "with_allDays_pattern",pattern="Negative units, optional elements, starting on 0th day", field="{ad}", status="N")
+        self.reporter.report(invalid_groups, "with_allDays_pattern",pattern="Negative units, optional elements, starting on 0th day", field="{ad}", status="N")
        
         # Safeguard
         leaks = valid_groups.filter(
@@ -450,7 +442,7 @@ class SupplementaryHandler:
 
         # Reporting
         self.logger.info(f"Output shape: {valid.shape}")
-        self.reporter.resolve(
+        self.reporter.report(
             invalid,
             "supplementary_dropped",
             pattern="Filtered item from a blacklist (variant contained blacklisted component).",
@@ -519,7 +511,7 @@ class SupplementaryHandler:
 
         # Reporting
         self.logger.info(f"Output shape: {valid.shape}")
-        self.reporter.resolve(
+        self.reporter.report(
             invalid,
             "supplementary_dropped_regimen_title",
             pattern="Regimen name contains blacklisted component (regex matched).",
@@ -549,7 +541,7 @@ class SupplementaryHandler:
             dropped_groups.append(subset_keys)
 
             # Reporting for this specific role
-            self.reporter.resolve(subset, name, pattern=f"Filtered component by role - {value}.", field="{co}, {cr}", status="N")
+            self.reporter.report(subset, name, pattern=f"Filtered component by role - {value}.", field="{co}, {cr}", status="N")
             # Collect for logging
             dropped_info.append((value, subset.height))
 
@@ -573,140 +565,3 @@ class SupplementaryHandler:
         # Exclude those variant groups
         filtered = frame.join(all_dropped, on=group_keys, how="anti")
         return filtered
-
-
-class Sumstats:
-    def __init__(self, logger:object):
-        self.logger = logger
-
-    def concat_with_overlap_diagonstics(self, subsets:list, group_keys):
-        overlap = lambda *args: (
-            lambda a, b, name: (
-                lambda o: self.logger.debug(f"[OVERLAP] {o.height} overlapping group_keys in {name}")
-                if o.height > 0 else None
-            )(a.select(group_keys).unique().join(b.select(group_keys).unique(), on=group_keys, how="inner"))
-        )(*args)
-
-        if len(subsets) > 1:
-            pairs = [((a[0], a[1]), (b[0], b[1])) for a, b in combinations(subsets, 2)]
-            for pair in pairs:
-                overlap(pair[0][1], pair[1][1], f"{pair[0][0]} vs {pair[1][0]}")
-        return pl.concat([subset[1] for subset in subsets])
-    
-    def log_summary(self, standard, funny, all_keys, group_keys):
-        all_keys_regimens_unique = (
-            all_keys
-            .select(["regimen_cui", "variant_cui"])
-            .unique()  # filters duplicated variants
-            .group_by("regimen_cui")
-            .agg(pl.col("variant_cui").n_unique().alias("n_variant"))
-            .select(pl.col("n_variant").sum())
-            .item()
-        )
-
-        standard_regimens_unique = ( 
-            standard
-            .select(["regimen_cui", "variant_cui"])
-            .unique() 
-            .group_by("regimen_cui")
-            .agg(pl.col("variant_cui").n_unique().alias("n_variant"))
-            .select(pl.col("n_variant").sum())
-            .item()
-        )
-
-        funny_regimens_unique = ( 
-            funny
-            .select(["regimen_cui", "variant_cui"])
-            .unique()
-            .group_by("regimen_cui")
-            .agg(pl.col("variant_cui").n_unique().alias("n_variant"))
-            .select(pl.col("n_variant").sum())
-            .item()
-        )
-        
-        funny_unique = funny.select(group_keys).n_unique()
-        
-        assert all_keys_regimens_unique == standard_regimens_unique + funny_regimens_unique, f"Mismatch in group splits! {all_keys_regimens_unique} != {standard_regimens_unique} + {funny_regimens_unique}"
-        
-        self.logger.info(f"[REPORT] Number of vanilla variants: {standard.shape[0]} ({standard_regimens_unique} unique)")
-        self.logger.info(f"[REPORT] Number of funny variants: {funny_unique} ({funny_regimens_unique} unique)")
-
-
-
-class Preprocessor:
-    def __init__(self, sigs_path, output_dir, log_dir=".", supplementary_file=None, sheet_config=None):
-       
-        self.logger     = Logger(log_dir, )
-        self.audits     = AuditColumnTypes(log_dir, "PRE.audit.log")
-        self.audits.audit(sigs_path)
-        self.report_path = f"{output_dir}/report_tables"
-        self.reporter   = Reporter(self.report_path) 
-        self.config     = sheet_config
-
-        self.s          = Frame().load_data(sigs_path)
-        self.sf         = supplementary_file
-        self.group_keys = ["condition_cui", "regimen_cui", "variant_cui"]
-        self.sigs_anatomy_essentials = [
-            'variant_cui', 
-            'allDays',
-            "cycle_length_lb", 
-            "cycle_length_ub",   
-            "cycle_length_unit",
-            "timing_sequence"
-        ]
-
-    def initialize(self, ):
-        self.null_handlers       = NullValueHandlers(self.logger, self.reporter)
-        self.regimen_handler     = RegimenHandler(self.logger, self.reporter)
-        self.variant_handler     = VariantHandler(self.logger, self.reporter)
-        self.pattern_handlers    = PatternHandlers(self.logger, self.reporter)
-        self.supp_handler        = SupplementaryHandler(self.logger, self.reporter)
-        self.sumstats            = Sumstats(self.logger)
-        return self # enables chaining
-
-
-    def run(self):
-        """Process the data (clean NaN and handle duplicates)."""
-
-        frame = self.s.clone()
-        group_keys = self.group_keys
-        fields = self.sigs_anatomy_essentials
-        supplementary_file = self.sf
-
-        # ----------- 1 level subset block -component level dropouts, variants kept ------------
-        frame = self.supp_handler.clean_by_role(frame, group_keys) 
-        frame = self.supp_handler.clean_by_blacklist(frame, supplementary_file, group_keys) 
-        frame = self.supp_handler.clean_by_blacklist_regimen(frame, supplementary_file, group_keys)
-
-        # ----------- 2 level subset block -regimen level dropouts ------------
-        frame = self.null_handlers.handle_nan_in_condition(frame)
-        frame = self.null_handlers.handle_nan_in_group_keys(frame, group_keys)
-        frame = self.null_handlers.handle_null_in_sigs(frame, fields, group_keys)
-        self.regimen_handler.log_regimen_level_stats(frame)
-        frame = self.regimen_handler.filter_imbalanced(frame, group_keys)
-        frame = self.regimen_handler.filter_rt(frame)
-        self.pattern_handlers.log_indefinite_cycle_length(frame, fields)
-
-        # ----------- 3 - level subset block -variant level drouputs ------------
-        checkpoint_df = self.variant_handler.create_checkopoint_frame(frame, group_keys) # safeguard
-        single_df, multi_df = self.variant_handler.handle_partial_variants(frame, group_keys)
-        cleaned_df, invalid_df_1 = self.pattern_handlers.all_days_pattern_handler(single_df, group_keys)
-        # cleaned_df, invalid_df_2 = self.pattern_handlers.from_to_by_pattern_handler(valid_df, group_keys)
-        
-        # # ----------- 4 - rejoin filtered -----------
-        funny_df = self.sumstats.concat_with_overlap_diagonstics(subsets=[("invalid_1", invalid_df_1), ("multi", multi_df)], group_keys=group_keys)
-        # ------------ 5 - logs + reports -----------
-        self.sumstats.log_summary(cleaned_df, funny_df, checkpoint_df, group_keys)
-        self.reporter.resolve(cleaned_df, "preproc_cleaned", pattern="No idiosyncracy. Clean", field="-", status="H")
-        # ---- << final frame >> ----
-        self.processed = cleaned_df.clone()
-        return self
-
-    def get_processed(self):
-        """Returns the final cleaned frame."""
-        if not hasattr(self, "processed"):
-            raise RuntimeError("Data has not been processed yet.")
-        return self.processed
-    
-    def build_reports(self):
-        build_reports(self.config, self.report_path, self.report_path)

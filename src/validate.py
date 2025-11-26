@@ -21,7 +21,7 @@ def process_all(file_dir):
 
     # Definitions Setup
     # OLD DATASETS SIGS only 2021
-    df_old = pd.read_csv(f"{curr_dir}/OTHER_REF/regimens_init.tsv", sep='\t')
+    df_old = pd.read_csv(f"{curr_dir}/OTHER_REF/regimens_legacy.tsv", sep='\t')
     df=pd.read_csv(file_target, sep='\t')
     regname_new = set(df['regName'].unique())
     regname_old = set(df_old['regName'].unique())

@@ -7,7 +7,10 @@
 
 # output: sigs_conditions.csv ( optional: total number sumstats )
 
-query_conditions = """
+# schema = "devv5"
+schema = "prodv5"
+
+query_conditions = f"""
 SELECT DISTINCT ON (c1.concept_id, c2.concept_id)
   c1.concept_id           as c1_id, -- regimen_cui in OMOP
   c1.concept_code         as c1_code, -- regimen_cui in sigs
@@ -21,10 +24,10 @@ SELECT DISTINCT ON (c1.concept_id, c2.concept_id)
   c2.domain_id            as c2_domain,
   c2.concept_class_id     as c2_class
 
-from devv5.concept c1
-join devv5.concept_relationship r 
+from {schema}.concept c1
+join {schema}.concept_relationship r 
   on r.concept_id_1 = c1.concept_id and r.invalid_reason is null
-join devv5.concept c2 
+join {schema}.concept c2 
   on c2.concept_id = r.concept_id_2
 
 where c1.vocabulary_id = 'HemOnc'
@@ -36,7 +39,7 @@ where c1.vocabulary_id = 'HemOnc'
 -- )
 """
 
-query_valid_drugs = """
+query_valid_drugs = f"""
 SELECT DISTINCT
     c.concept_id,
     c.concept_name,
@@ -47,9 +50,9 @@ SELECT DISTINCT
     c.invalid_reason,
     cr.concept_id_2 AS valid_concept_id
 FROM
-    devv5.concept c
+    {schema}.concept c
 LEFT JOIN
-    devv5.concept_relationship cr
+    {schema}.concept_relationship cr
     ON c.concept_id = cr.concept_id_1
     AND cr.relationship_id = 'Maps to'
 WHERE
