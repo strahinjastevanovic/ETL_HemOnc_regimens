@@ -40,7 +40,7 @@ class AuditColumnTypes:
             json.dump(schema, f, indent=2)
 
 
-class Tracking:
+class Tracker:
     def __init__(self, logger:object):
         self.logger = logger
 

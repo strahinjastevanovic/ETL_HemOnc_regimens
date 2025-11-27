@@ -1,7 +1,7 @@
 from pipeline.log import Logger
 from pipeline.audit import (
     AuditColumnTypes,
-    Tracking
+    Tracker
 )
 from pipeline.handlers import (
     Frame,
@@ -42,7 +42,7 @@ class Preprocessor:
         self.variant_handler     = VariantHandler(self.logger, self.reporter)
         self.pattern_handlers    = PatternHandlers(self.logger, self.reporter)
         self.supp_handler        = SupplementaryHandler(self.logger, self.reporter)
-        self.tracker             = Tracking(self.logger)
+        self.tracker             = Tracker(self.logger)
         self.resolver            = Resolver(self.logger, self.reporter)
         return self # enables chaining
 
@@ -83,7 +83,7 @@ class Preprocessor:
         # ----------- 3.2 - all days pattern handler -----------------
         cleaned_df, invalid_df_1 = self.pattern_handlers.all_days_pattern_handler(mixed_df, group_keys)
 
-        #  ----------- 4 - Tracking filtered -----------
+        #  ----------- 4 - Tracker filtered -----------
         funny_list = [
             ("invalid_1", invalid_df_1), 
         ]

@@ -3,25 +3,20 @@
 
 ## Section Step 1 – Vocabularies Preprocessing
 
-This step loads the core raw HemOnc input tables — `sigs`. Additional information are derived from postgres mirror of Athena database which stratify data using standardized vocabularies and provide OMOP-compatible ontology. Output of the current step preprocessing:
+This step loads the core raw HemOnc input table — `sigs`. Additional information is derived from a Postgres mirror of the Athena database, which stratifies data using standardized vocabularies and provides OMOP-compatible ontology. Output of this preprocessing step:
 
 - `sigs_with_conditions.tsv`   
 
-In context of condition exploit, records are **exploded** — meaning one row becomes many. 
+In the context of condition expansion, records are exploded — meaning one input row may become many.
 
 Additionally, a **modular blacklist system** is applied to remove irrelevant or noise entries early in the pipeline. This is JSON-based, easy to expand, and helps filter invalid terms by rule or pattern.
 
->💡 Handlers are disscused in below sections
+>💡 Handlers are discussed in the sections below
 
-Modular blacklist system is expanded into full section with **idiosyncracies logs**, **handlers** and **autids**. The reporting system works as a side effect during initial steps of the pipeline. Output of the current step preprocessing:
+The modular blacklist system is expanded into its own section describing handlers, reporters, and resolver classes. The components form a pipeline that seamlessly pre-processes and tracks idiosyncrasies to minimise regression errors. The reporting system runs as a side effect during the initial pipeline steps. Output of this preprocessing step:
 
 - `reports.xlsx`  
 
-**Requirements**  
-Libraries used for processing: 
-`pandas`, `polars`, `numpy`, ...
-
-See other requirements in the current repository.
 
 ## Section Step 2 – Transformation & Regimen Construction
   
@@ -210,22 +205,59 @@ By identifying the shoretest repeating string (shortString):
 
 ### Multiple Representation Handling (idiosyncrasies)
 
-_Class_
-`Frame`
-`NullValueHandlers`
-`RegimenHandler`
-`VariantHandler` `PatternHandlers` 
-`SupplementaryHandler`
-`AuditColumnTypes`
-`Tracking`
-`Preprocessor`
+_Class types_
+`Handlers`
+`Tracker`
+`Logger`
 `Resolver`
+`Preprocessor`
 
-_Function_
-`audit`
-`handlers`
-`report`
-`resolvers`
+- NullValueHandlers  
+  - removes groups where any grouping key is null and writes the dropped groups to a report.  
+  - fills missing condition/condition_cui with "undefined", logs and reports affected regimens.  
+  - detects variants where any essential signature field is null, reports them and drops entire affected variants.
+
+- RegimenHandler  
+  - Records counts and exports unique group metadata.  
+  - Radiotherapy: detects, reports and drops radiotherapy-containing regimens (various RT tokens).
+  - Imbalanced: finds and drops regimen groups where different variants have unequal numbers of components; reports component mismatches and writes per-variant component summaries.
+
+- VariantHandler  
+  - Partial variants: classifies variants as single- or multi-part, reports counts, and separates multi-part cases for resolution; writes reports for multi-part and single-part variants.
+
+- PatternHandlers  
+  - Logging indefinite cycles: flags groups with cycle_length_unit == "indeterminate" and logs counts.  
+  - Days patterns: identifies and separates variants that contain unhandled patterns in allDays
+    - negative indices 
+    - ranges
+    - optional markers  
+
+
+- SupplementaryHandler  
+  - Blacklist use: applies component-level blacklist, logs dropped components and removes whole variant groups that contain any blacklisted component.  
+  - Blacklist use (regimen name): applies blacklist regexes against the regimen title and drops groups where the regimen matches forbidden patterns; reports dropped groups.  
+  - Component role clean: removes variants that contain disallowed component roles (e.g., "secondary systemic", "locoregional"), reports per-role and aggregated drop statistics.
+
+- AuditColumnTypes (audit)  
+  - Samples input rows, infers types and writes a JSON schema and audit log.
+
+- Tracker  
+  - concatenates multiple subsets while logging overlaps between them (used to validate that dropped/kept splits are disjoint).  
+  - verifies counts of variants across splits (standard vs funny/dropped), asserts conservation of variant counts, and logs summary stats.
+
+- Reporter   
+  - Centralized reporting: writes diagnostic TSVs during preprocessing and compiles them into an Excel workbook (reports.xlsx) using a sheets configuration. Adapts/group-stats and computes per-regimen status percentages.
+
+- Resolver 
+  - handles idiosyncracies
+  - Resolving partial variants:
+   takes multi-part variant frame groups and attempts to collapse/resolve duplicates within a component by comparing component_cui, timing_sequence and step_number. It keeps a single representative row per resolved component (drops exact duplicates or differing step variants according to heuristics), writes a 'resolved' report TSV and returns the cleaned frame.  
+
+
+How they work together (orchestration)
+
+- Preprocessor initializes these components and runs them in a staged pipeline: supplementary/blacklist and role filters → null/value audits and regimen-level filters (RT, imbalance) → split single vs multi-part variants → resolver fixes multi-part variants → pattern handlers validate allDays/timing formats → tracking and reporting produce TSV/XLSX diagnostics. The design favors conservative drops with reporting so problematic cases can be audited and iteratively patched.
+
 
 ### Outputs
 - The primary output format:  `regimens.tsv` – a normalized, structured list of regimens with timing encoded
@@ -255,41 +287,54 @@ Uses of case dependant additions:
 
 
 
----
+### Reports
 
+The report module centralizes diagnostic collection during preprocessing and prepares the final Excel workbook (reports.xlsx). Key responsibilities:
+
+- Reporter (class): 
+  - Normalizes report metadata (Pattern, Field, Status) and enforces the F_LABEL tag ("reported") used as file suffix.
+  - Writes per-report TSV files named <file_name>.reported.tsv into the report_tables folder.
+  - Annotates the frame with decoded human-friendly Pattern, Field and Status values then writes the annotated TSV.
+  - Excel assembly
+  - Reads a JSON sheet configuration (list of sheets with target headers).
+  - Excel assembly: 
+    - Process each from discovered <report_tables>/*.reported.tsv files to a worksheet.
+
+---
 ## Section Step 3 – Reference Completion: Regimen Groups & Valid Drugs
 
-This step ensures all new entries in the pipeline output are mapped to known reference groups. 
+This step maps pipeline outputs to reference resources and produces two canonical files used downstream:
 
+- regimengroups.tsv
+- validdrugs.tsv
 
-<TODO-add-behaviour-from-postgres-loadings>
+Section scope:
+  - Queries
+  - Runs the vocabulary extraction and enrichment flow using a DB engine, extracts conditions and drugs data.
 
 ---
 
 ## Section Step 4 – Serialization (R)
 
-This step performs **final loading and serialization**. It converts tabular `.tsv` outputs into `.rda` format for use in R analytics. This is the last preparation step before R-based modeling or visualization.
+This step performs **final loading and serialization**. It converts tabular `.tsv` outputs into `.rda` format for use in R analytics. 
 
-### Functional Breakdown
-
-**Requirements**
-`R base`, `read.delim`, `save`
-
-**Call script:** `build_rda.R`
+- serialization side-effects
+    - Ensure every regName in the ETL output has a regimen-group assignment, preserving existing groupings and extending them for novel items.
+    - Loads the validdrugs query output (the Athena/HemOnc drug concepts file) and normalizes column names according to VALID_DRUGS_RELMAP.
+    - Compares component names between ETL output and the vocabulary query, logging summary counts (shared, only-in-HemOnc, only-in-Athena) 
+    - Produce a validated, remapped drug reference table that can be joined with ETL components for classification and lookups.
 
 - Reads:
   - `regimens.tsv` → `regimens.rda`
   - `validdrugs.tsv` → `validdrugs.rda`
   - `regimengroups.tsv` → `regimengroups.rda`
-- Saves outputs using native `save()` calls in R
-- Outputs are stored in `.rda` format
 
 ---
 
-## Section Step 5 – Validation (Legacy code)
+## Section Step 5 – Validation
 
 ### Overview  
-This step compares newly created regimens (`sigs2024`) to a legacy trusted set (`sigs2021`). The goal is to check for:
+This step compares freshly created regimens (`sigs2024`) to a legacy trusted set (`sigs2021`). The goal is to check for:
 
 - Exact matches
 - Acceptable deviations (partial matches)
@@ -300,8 +345,8 @@ This ensures continuity across ETL versions and identifies issues caused by data
 ### Output Details
 
 - **Tagging**
-  - `sigs2021`: legacy reference
-  - `sigs2024`: newly generated table
+  - `sigs2021`: legacy regimens
+  - `<output/path/to/regimens.tsv>`: *new* regimens
 
 - **Normalization & Cleanup**
   - Lowercases all regimen names
@@ -319,15 +364,9 @@ This ensures continuity across ETL versions and identifies issues caused by data
     - ❌ **Mismatch:** same regimen name maps to entirely different content — often due to conflicting variants or ambiguous mappings
 
 
-### Functional Breakdown
-**Requirements:**  
-`pandas`, `os`, `sys`, `re`  
-**Call script:** `validate.py`
-
 - Loads:
   - `regimens.tsv` (2024)
   - `regimens_legacy.tsv` (2021 ref)
-- Compares `regName` sets with legacy strings
 - Generates validation summary at `${workdir}/validation/`
 
 

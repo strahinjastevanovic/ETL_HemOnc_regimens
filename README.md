@@ -1,15 +1,18 @@
 # Regimens Assembler
 Pipeline for assembling regimens from HemOnc datasets (sigs table)
 
-For details checkout `assets/Assembler_main.md`
+For strategy and details see `assets/Assembler_main.md`
 
-# Setup
+## Setup
 
-0. You would need to setup postgres connection first to access Athena mirror resources.
+- You need to setup connection with OMOP CDM DB first. 
+See `.env.template`.
 
-1. Use requirements.txt to setup env. Checkout `.env.template`.
+- Install environment from `requirements.txt`
 
-# Run pipeline
+## Run 
+
+Create regimens with the following command:
 
 ```
 ./MAIN.sh -out output-assembled
