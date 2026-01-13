@@ -16,3 +16,4 @@ queries/vocab.session.sql
 INPUT_FILES_HEMONC/sigs_conditions.csv
 
 .env
+.tmp

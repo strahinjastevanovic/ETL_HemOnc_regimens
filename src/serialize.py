@@ -1,6 +1,6 @@
 import pandas as pd
 import random
-from pipeline.log import Logger
+from load.log import Logger
 
 def generate_reg_group(regimen_tsv, ref_reggroups, workdir="."):
     """
