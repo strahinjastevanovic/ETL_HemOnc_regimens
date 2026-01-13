@@ -1,4 +1,4 @@
-from pipeline.log import Logger 
+from load.log import Logger 
 
 from itertools import combinations
 import json
@@ -58,14 +58,38 @@ class Tracker:
                 overlap(pair[0][1], pair[1][1], f"{pair[0][0]} vs {pair[1][0]}")
         return pl.concat([subset[1] for subset in subsets])
     
-    def log_summary(self, standard, funny, all_keys, group_keys):
+    def log_summary(self, standard, all_keys, group_keys):
+        """
+        Takes cleaned frame (standard)
+        and compare to checkpoint frame (all_keys)
+        against group_keys
+        """
+        keys = ["regimen_cui", "variant_key"]
+
+        get_total_variants_of_all_regimens = lambda table: table.select(keys) \
+            .unique() \
+            .group_by("regimen_cui") \
+            .agg(pl.col("variant_key").n_unique().alias("n_variant")) \
+            .select(pl.col("n_variant").sum()) \
+            .item()
+
+        all_keys_sum = get_total_variants_of_all_regimens(all_keys)
+        standard_sum = get_total_variants_of_all_regimens(standard)
+        
+        assert all_keys_sum == standard_sum, f"Mismatch in group splits! {all_keys_sum} != {standard_sum}"
+        
+        self.logger.info(f"[AUDIT] Number of variants: {standard.shape[0]} ({standard_sum} unique)")
+
+
+
+    def log_summary_outliers(self, standard, funny, all_keys, group_keys):
         """
         Takes cleaned frame (standard)
         all dropped records (funny) 
         and compare to checkpoint frame (all_keys)
         against group_keys
         """
-        keys = ["regimen_cui", "variant_cui"]
+        keys = ["regimen_cui", "variant_key"]
 
         # shared_keys = (
         #     standard.select(keys).unique()
@@ -88,7 +112,7 @@ class Tracker:
         get_total_variants_of_all_regimens = lambda table: table.select(keys) \
             .unique() \
             .group_by("regimen_cui") \
-            .agg(pl.col("variant_cui").n_unique().alias("n_variant")) \
+            .agg(pl.col("variant_key").n_unique().alias("n_variant")) \
             .select(pl.col("n_variant").sum()) \
             .item()
 

@@ -1,0 +1,41 @@
+so lets just try to understand the intent of the vector once more... tseq should be or last_day if its more clear, its the information of drug and drugs signature stacking that needs to be considered
+
+I ll continue from paclitax example
+
+"1,2,3" , tsq=10 (this is to say last day is 10)
+"4,5", tseq=12 (this is to say last day is 12)
+
+when we vector and append to matrix
+1        2       3       4       5 
+1,0*9,1,0*9,1,0*9
+                            1,0*12,1,0*12
+
+but it is usually
+drugA "1,2,3" tsq=10   but this is now calculated tsq from e.g. drugA 2,5,8
+drugB 1,2,3,4,5,6,7,8,9,10), so tseq indeed is max but and this should be passed as normalized vector length (it should have length of 10 0s or 1s in)
+drugB "1,2,3" tsq=10
+
+so in this case the STACK of the vector to matrix is:
+             1 2 3 4 5 6 7 8 9 10
+DrugA  0 1 ...
+DrugB  1 1 ...
+representing single cycle 
+
+and then this edge multi parted case where
+
+DrugA "1,2,3" allDays 1,2,3 cycleLength 8
+DrugB "1,2,3" allDays 10,11 cycleLength 12
+
+so here
+
+[ 1, 1, 1, 0, 0, 0, 0, 0]
+[ 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0]
+
+so THIS is the case of missmatch vector where I want to use BLOCK (same timing_seq group but different cy length ..allDays involved)
+
+and so it should be correctly passed by tseq of 12 
+
+and so 
+[ 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+[ 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0]
+

@@ -73,7 +73,7 @@ echo -e "\n%%% Pre-processing... %%%\n"
 python3 - <<EOF
 import sys
 sys.path.insert(0, "${SRC_DIR}")
-from preproc import preprocessing
+from load import preprocessing
 if __name__ == "__main__":
     preprocessing("${WORKDIR}/sigs_w_conditions.csv", "${WORKDIR}", "${LOGS}", "${SUPP_FILE}", "${SHEET_CONFIG}")
 EOF

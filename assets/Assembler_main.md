@@ -11,20 +11,20 @@ In the context of condition expansion, records are exploded — meaning one inpu
 
 Additionally, a **modular blacklist system** is applied to remove irrelevant or noise entries early in the pipeline. This is JSON-based, easy to expand, and helps filter invalid terms by rule or pattern.
 
->💡 Handlers are discussed in the sections below
+>💡 Handlers are explained in the sections below
 
 The modular blacklist system is expanded into its own section describing handlers, reporters, and resolver classes. The components form a pipeline that seamlessly pre-processes and tracks idiosyncrasies to minimise regression errors. The reporting system runs as a side effect during the initial pipeline steps. Output of this preprocessing step:
 
 - `reports.xlsx`  
 
 
-## Section Step 2 – Transformation & Regimen Construction
+## Section Step 2 – Transformation & Regimens Assembly
   
-This step applies logic for **regimen strings** creation, which represent ordered combinations of treatment components over time.
+This step applies logic for **regimen strings** creation, which represent ordered combinations of treatment components over time. The core implementation is **Shortest Repeating Element (SRE)**.
 
-### Details on SRE (Shortest Repeating Element) module implementation
+### SRE Module 
 
-_Class: `RegStringHandler`_  
+_Class: `SREModule`_  
 _Module `sre_tools`_
 
 The **SRE module** is responsible for translating raw treatment data into ordered, time-aware **regimen strings**. It is designed with an intent to capture both continuous and cyclical regimen forms. The formatting process leads to creation "short string" which is regimen data stored as alignment-ready representation object.
@@ -76,10 +76,12 @@ Each component in a group is individually transformed into a binary vector that 
 #### 2. Event Matrix Collapse
 
 _Function:_   
-_`collapse_event_matrix_wrapper() (via create_reg_string)`_  
-_`collapse_event_matrix()`_
+`collapse_event_matrix_wrapper`   
+`collapse_event_matrix`
 
-Once all component vectors are created and aligned:
+For the event-matrix collapse encoding, the invariant is: the sum of all emitted time-deltas equals the total timeline length $N$ - i.e. the number of days in the full long vector spanning all cycles.
+
+During vectors block placement:
 
 * Validates vector lengths and presence of multiple variants.
 * Pads all vectors to the same length across components and cycles.
@@ -282,8 +284,10 @@ Uses of case dependant additions:
 
 - New columns:
     `metaConditions` - for condition group selection,
-    `ATC codes` - drug classification codes 
     etc.
+
+- Not used and need re-definition:
+
 
 
 

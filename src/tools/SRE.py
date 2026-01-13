@@ -1,9 +1,12 @@
 import polars as pl
 from tqdm import tqdm
-import time
+import logging
+import sys
+from pathlib import Path
+from dataclasses import dataclass
+from typing import Set, Dict, List, Tuple, Optional
+import numpy as np
 
-from pathlib import Path 
-import sys 
 sys.path.insert(0, str(Path(__file__).parent.resolve()))
 
 from sre_tools import (
@@ -11,311 +14,283 @@ from sre_tools import (
     convert_to_days,
     get_idays,
     build_component_vector,
-    collapse_event_matrix_wrapper as create_reg_string
+    collapse_event_matrix_wrapper as create_reg_string,
 )
 
-import logging
+GROUP_KEYS_LOG = ["condition", "regimen", "variant"]
+GROUP_KEYS = ["condition_cui", "regimen_cui", "variant_key"]
 
-class Handlers:
-    def __init__(self):
-        pass 
-    
-    # TODO: variants explosion
-    # Unhandled 2,(+2) at the moment
-    # Unhandled (+) might match group timing_sequence pattern
-    @staticmethod
-    def handle_timing_sequence(group: pl.DataFrame) -> pl.DataFrame:
-        """
-        timing_sequence will be changed if contains (.*) pattern, other unaffected
-        - For values like '(3),(4)' alone -> remove parentheses only
-        - For mixed values like '1,(+c),12' -> remove all (...) blocks
-        - For values in brackets and not, remove the optional part (brackets)
-        """
 
-        group = group.with_columns([
-            pl.when(
-                pl.col("timing_sequence").str.contains(r"^(\(.*?\),?)+$", literal=False)  # simulates full_match
-            )
-            .then(
-                pl.col("timing_sequence").str.replace_all(r"[()]", "", literal=False)
-            )
-            .when(
-                pl.col("timing_sequence").str.contains(r"\(.*?\)", literal=False)
-            )
-            .then(
-                pl.col("timing_sequence")
-                .str.replace_all(r"\(.*?\)", "", literal=False)
-                .str.replace_all(r",+", ",")  # clean up double commas
-                .str.strip_chars(",")         # trim edge commas
-            )
-            .otherwise(pl.col("timing_sequence"))
-            .alias("timing_sequence")
-        ])
+@dataclass(frozen=True)
+class SREState:
+    drug: str
+    timing_sequence: int
+    all_days: str
+    idays: List[int]
+    cycle_length_lb: float
+    cycle_length_ub: float
+    cycle_length_unit: str
 
-        return group
-    
-    @staticmethod
-    def patch_indeterminate_cycles(group: pl.DataFrame) -> pl.DataFrame:
-        """
-        Patch '(+c)' with '1' in cycle_length_lb or cycle_length_ub
-        only when cycle_length_unit == 'indeterminate'.
-        """
+    @property
+    def cycle_lengths(self) -> Set[float]:
+        return {float(self.cycle_length_lb), float(self.cycle_length_ub)}
 
-        log_chunk = ""
-       
-        patch_mask = (
-            (pl.col("cycle_length_unit") == "indeterminate") &
-            (pl.col("cycle_length_lb") == "(+c)") |
-            (pl.col("cycle_length_ub") == "(+c)")
-        )
 
-        matching_rows = group.filter(patch_mask)
-
-        # Check how many rows matched
-        if matching_rows.height > 0:
-            log_chunk+=f"Applying patch to {matching_rows.height} rows with '(+c)' under cycle_length lb or ub"
-
-        return group.with_columns([
-            pl.when(patch_mask).then(pl.lit("1")).otherwise(pl.col("cycle_length_lb")).alias("cycle_length_lb"),
-            pl.when(patch_mask).then(pl.lit("1")).otherwise(pl.col("cycle_length_ub")).alias("cycle_length_ub"),
-        ]), log_chunk
-
-class RegStringHandler:
+class SREModule:
     def __init__(self, frame_path: str, log_dir: str):
         self.frame = pl.read_parquet(frame_path)
         self.logger = self._setup_logging(log_dir)
+
         print("[INFO] Loaded schema:", self.frame.schema)
-        self.logger.info(f"Loaded schema:\n {self.frame.schema}")
+        self.logger.info(f"Loaded schema:\n{self.frame.schema}")
 
-
-    def _setup_logging(self, log_dir): # TODO: cleanify
+    def _setup_logging(self, log_dir: str) -> logging.Logger:
         logger = logging.getLogger(__name__)
         logger.setLevel(logging.DEBUG)
         logger.propagate = False
 
         formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 
-        # Info-only handler → process.log
-        info_handler = logging.FileHandler(f"{log_dir}/SRE.process.log", mode='w')
-        info_handler.setLevel(logging.INFO)
-        info_handler.addFilter(lambda record: record.levelno == logging.INFO)
-        info_handler.setFormatter(formatter)
+        # Consolidated log file: SRE.log contains all DEBUG and INFO messages
+        log_handler = logging.FileHandler(f"{log_dir}/SRE.log", mode="w")
+        log_handler.setLevel(logging.DEBUG)
+        log_handler.setFormatter(formatter)
 
-        # All else (debug, warning, error, critical) → output.log
-        output_handler = logging.FileHandler(f"{log_dir}/SRE.output.log", mode='w')
-        output_handler.setLevel(logging.DEBUG)
-        output_handler.addFilter(lambda record: record.levelno != logging.INFO)
-        output_handler.setFormatter(formatter)
-
-        logger.addHandler(info_handler)
-        logger.addHandler(output_handler)
+        logger.addHandler(log_handler)
 
         return logger
 
+    def _log_reg_counts(self, group: pl.DataFrame, reg_strings: List[str]) -> None:
+        if len(reg_strings) > 1:
+            group_id = group.select(GROUP_KEYS_LOG).to_numpy()[0]
+            self.logger.debug(f"N_STRINGS={len(reg_strings)} @ {group_id}")
+            self.logger.debug(reg_strings)
 
-    def _process_group(self, group: pl.DataFrame ) -> pl.DataFrame:
+    def _infer_block_tseq(self, block: pl.DataFrame) -> int:
         """
+        Infer authoritative block length (last_day) for a timing_sequence block.
         
-        Input: regimen_cui .. variant_cui .. condition_cui group
-
-        # Boiled-down hierarchy
-                   regimen -> variant > <portion?> -> components/cui -> step_number
-                   step is repeated once or more -> 
-                   sig anatomy (cycle_length_lb, cycle_length_ub, cycle_length_unit, timing_sequence) ->
-                   allDays [-> freq/cui # dose-stuff
-
-        """ 
-
-        group = Handlers.handle_timing_sequence(group)
-        group, log_chunk = Handlers.patch_indeterminate_cycles(group)
-
-        if log_chunk != "":
-            self.logger.error(f"[PATCHED] Detected unhandled case - {log_chunk}")
-
-        # needed for matrix cration endpoint only!
-        try:
-            total_vector_len = get_last_cycle(group.select("timing_sequence").unique().to_series().to_list())
-        except:
-            print(group.select("timing_sequence").unique().to_series().to_list())
-            raise ValueError("Processing total vector length is non-standard.")
-
-        # Is there any group size greater then 1?
-        # NOTE: current implementation does not support duplicate components per MAIN group
-        # Will be changed once variant_cui allows multipart Sigs... TODO
-        component_groups = group.group_by("component")
-        counter_mix = 0
-        for g_drug, df in component_groups:
-            if df.height > 1:
-                counter_mix+=1
-                self.logger.debug(f"Component '{g_drug}' has multiple entries ({df.height} rows).")
-        if counter_mix == 0:
-            self.logger.debug(f"No duplicate components per group. Safe for processing w/o components groups")
-
-        component_vectors = {}
-        component_error = False  # Track failure
-        days_error = False  # Track failure
-        for row in group.iter_rows(named=True):
-            
-            drug = str(row['component']).strip().replace(" ", "").lower().capitalize()  
-            timing_sequence = row['timing_sequence']
-            allDays = row['allDays']
-            cycle_length_lb = row['cycle_length_lb']
-            cycle_length_ub = row['cycle_length_ub']
-            cycle_length_unit = row['cycle_length_unit']
-            
-            # extract all days 
-            # TODO: these are cleaned at the moment no (n+, c+) or (optional)... 
-            # Need to handle all cases
-            idays = get_idays(allDays)
-            
-            
-            # TODO: This will create 2 subvariants shortStrings at the moment !
-            # Decided to keep it this way for now instead of range or single value
-            # Also in matrix, we are not mixing lb and ub at the moment!... ether all lb or ub...
-            # It uses set not to repeat indeterminate cases, since both are = 1
-            cycle_lengths = set(map(float, [cycle_length_lb, cycle_length_ub]))
-            
-            # Logs
-            self.logger.info(f"-----Component: {drug}------")
-            self.logger.info(f"cycle size: {cycle_length_lb} {cycle_length_ub} {cycle_length_unit}")
-            self.logger.info(f"days within a cycle (parsed): {idays}")
-            self.logger.info(f"this component is given in: {timing_sequence} of {total_vector_len}-cycle long regimen.")
-                
-            # main SRE block
-            for length in cycle_lengths:
-                try:
-                    length_in_days = convert_to_days(
-                        length, 
-                        cycle_length_unit, 
-                        allDays # handling indeterminate cases
-                        )
-                except Exception as e:
-                    group_id = group.select(['condition', 'regimen', 'variant']).to_dicts()
-                    self.logger.error(f"[SKIPPED days] Length:{length} @ CycLenUnit:{cycle_length_unit} @ allDays={allDays} : [ERR] {e}")
-                    days_error = True
-                    break
-
-                try:
-                    component_vector = build_component_vector(idays, length_in_days)
-                except Exception as e:
-                    group_id = group.select(['condition', 'regimen', 'variant']).to_dicts()
-                    self.logger.error(f"[SKIPPED COMPONENT] Cycle: {length} @ Unit: {cycle_length_unit} @ AllDays {allDays} @ i-AllDays {idays} @ Length in Days - {length_in_days}: [ERR] {e}")
-                    component_error = True
-                    break
-                
-                if component_error or days_error:
-                    break  # break out of rows
-                component_vectors.setdefault(drug, []).append((timing_sequence, component_vector))
-
-        try:
-            group_reg_string = create_reg_string(component_vectors)
-        except Exception as e:
-            group_id = group.select(['condition', 'regimen', 'variant']).to_dicts()
-            self.logger.error(f"[SKIPPED GROUP] Failed to create reg string {group_id} - [ERR] {e}")
-            # Tag the group rows with null regString (preserving row count)
-            null_col = pl.Series("regString", [None] * group.height)
-            return group.with_columns(null_col)
-
-        # How many regStrings are we generating?
-        n_strings = len(group_reg_string)
+        This represents the last day in the timeline when all drugs in this timing_sequence
+        block are stacked into a single matrix. It must be large enough to accommodate:
+        1. All actual drug administration days (allDays parsed to idays)
+        2. All cycle length metadata (lb/ub converted to days)
         
-        if n_strings > 1:
-            group_id = group.select(['condition', 'regimen', 'variant']).to_numpy()[0, :]
-            self.logger.debug(f"N_STRINGS={n_strings} @ {group_id}")
-            self.logger.debug(group_reg_string)
+        Example:
+        - timing_seq="1,2,3" with DrugA allDays=[1,2,3] and DrugB allDays=[10,11]
+        - DrugA needs last_day >= 3, DrugB needs last_day >= 11
+        - Block's last_day = max(3, 11) = 11
+        - Both vectors padded to length 11 for matrix stacking
+        
+        tseq (total sequence length) = max(
+            max(allDays across all drugs),
+            max(cycle_length_lb, cycle_length_ub) converted to days across all drugs
+        )
+        """
+        max_day_from_allDays = 0
+        max_day_from_meta = 0
 
-        # duplicate the full group N times
-        group_repeated = pl.concat([group] * n_strings, how="vertical")
-        # attach the regString column — one for each duplicate block
-        reg_string_col = pl.Series("regString", group_reg_string).repeat_by(group.height).explode()
-        # final frame 
-        group_with_regstrings = group_repeated.with_columns(reg_string_col)
+        for row in block.iter_rows(named=True):
+            idays = get_idays(row["allDays"])
+            if idays:
+                max_day_from_allDays = max(max_day_from_allDays, max(idays))
 
-        return group_with_regstrings
-      
+            try:
+                lb = float(row["cycle_length_lb"])
+                ub = float(row["cycle_length_ub"])
+                unit = row["cycle_length_unit"]
+                meta_days = max(
+                    convert_to_days(lb, unit, idays),
+                    convert_to_days(ub, unit, idays),
+                )
+                max_day_from_meta = max(max_day_from_meta, meta_days)
+            except Exception:
+                self.logger.warning(
+                    f"Failed to convert cycle lengths to days for row: \n{row}"
+                )
 
-    def get_cycle_length_mismatch_regimens(df: pl.DataFrame) -> int:
-        numeric_pattern = r"^\d+(\.\d+)?$"
+        tseq = max(max_day_from_allDays, max_day_from_meta)
 
-        return pl.concat([
-            df.filter(
-                df["cycle_length_lb"].str.contains(numeric_pattern, literal=False) &
-                df["cycle_length_ub"].str.contains(numeric_pattern, literal=False)
-            )
-            .with_columns([
-                pl.col("cycle_length_lb").cast(pl.Float64).alias("lb"),
-                pl.col("cycle_length_ub").cast(pl.Float64).alias("ub")
-            ])
-            .filter(pl.col("lb") != pl.col("ub")),
+        if tseq <= 0:
+            raise ValueError("Cannot infer tseq for timing_sequence block")
 
-            df.filter(
-                ~df["cycle_length_lb"].str.contains(numeric_pattern, literal=False) &
-                ~df["cycle_length_ub"].str.contains(numeric_pattern, literal=False) &
-                df["cycle_length_lb"].is_not_null() &
-                df["cycle_length_ub"].is_not_null() &
-                (pl.col("cycle_length_lb") != pl.col("cycle_length_ub"))
-            )
-        ], how="vertical_relaxed")["regimen"].unique().height
-    
-    def log_timing_sequence_regimen_categories(self, df: pl.DataFrame):
-        condition_only_brackets = df["timing_sequence"].str.contains(r"^(\(.*?\),?)+$", literal=False)
-        condition_mixed_brackets = df["timing_sequence"].str.contains(r"\(.*?\)", literal=False)
+        return int(tseq)
 
-        # Compute masks
-        mask_only = condition_only_brackets
-        mask_mixed = ~condition_only_brackets & condition_mixed_brackets
-        mask_other = ~condition_only_brackets & ~condition_mixed_brackets
+    def _build_vector_from_idays(
+        self,
+        idays: List[int],
+        tseq: int,
+        group_id=None,
+        drug=None,
+        timing_sequence=None,
+    ) -> np.ndarray:
+        """
+        Build a binary vector of length tseq using absolute idays positions.
+        """
+        vec = np.zeros(tseq, dtype=int)
+        
+        if not idays:
+            self.logger.error(f"[SRE ERR] Empty idays for drug={drug} timing_sequence={timing_sequence}")
+            # raise ValueError(f"Empty idays for drug={drug} timing_sequence={timing_sequence}")
+            return vec 
+            
+        for d in idays:
+            if d < 1 or d > tseq:
+                raise ValueError(
+                    f"[SRE] day {d} out of range tseq={tseq} "
+                    f"drug={drug} timing_sequence={timing_sequence} group={group_id}"
+                )
+            vec[d - 1] = 1
 
-        patch_mask = (
-            (df["cycle_length_unit"] == "indeterminate") &
-            ((df["cycle_length_lb"] == "(+c)") | (df["cycle_length_ub"] == "(+c)"))
+        return vec
+
+    def _process_group(self, group: pl.DataFrame) -> pl.DataFrame:
+        """
+        Process a group (regimen_cui, variant_cui, condition_cui) by building component vectors
+        for each timing_sequence block, generating regimen strings, and mapping cycle lengths.
+        
+        Key insight: tseq (last_day) is the information needed for stacking drug vectors into
+        a single matrix. When drugs in the same timing_sequence have different cycle contexts
+        (different allDays or cycle_length ranges), their vectors must all be padded to the
+        same length (the block's tseq) to align in the matrix.
+        
+        Workflow:
+        1. For each timing_sequence: Compute tseq = last_day needed to fit ALL drugs in that block
+        2. Build vectors of length tseq for all drugs, padding with zeros where needed
+        3. Stack vectors into component_vectors Dict[drug] = List[(timing_seq, vec)]
+        4. Pass to create_reg_string() which handles:
+           - normalize_multicycle_spans: Groups by vector length (handles multi-timing-seq case)
+           - validate_and_split_variants: Returns one dict per unique vector length
+           - collapse_event_matrix: Generates one regimen string per dict
+        5. Map cycle length: Each regimen string gets the tseq that produced its vectors
+        6. Repeat group and attach regString and cycleLength columns
+        """
+        group_id = group.select(GROUP_KEYS_LOG).to_dicts()
+
+        component_vectors: Dict[str, List[Tuple[str, np.ndarray]]] = {}
+
+        # Process by timing_sequence: each block has independent drugs that must align
+        for timing_seq, block in group.group_by("timing_sequence", maintain_order=True):
+
+            # timing_seq from group_by is a tuple; extract the string value
+            timing_seq_str = str(timing_seq[0]) if isinstance(timing_seq, (tuple, list)) else str(timing_seq)
+
+            # tseq = last_day in timeline for this timing_sequence block
+            # Example: timing_seq="1,2,3" (3 cycles) with drugs having allDays up to day 10
+            #          → tseq = 10 (all vectors padded to length 10)
+            #          timing_seq="4,5" (2 cycles) with drugs having allDays up to day 12
+            #          → tseq = 12 (all vectors padded to length 12)
+            tseq = self._infer_block_tseq(block)
+
+            # Process each row in the timing_sequence block
+            for row in block.iter_rows(named=True):
+                drug = (
+                    str(row["component"])
+                    .strip()
+                    .replace(" ", "")
+                    .lower()
+                    .capitalize()
+                )
+
+                idays = get_idays(row["allDays"])
+
+                # Extract cycle_length bounds and create variant set
+                # If lb ≠ ub, this creates two separate variants for the same drug
+                # (both will be padded to the block's tseq)
+                try:
+                    cycle_length_lb = float(row["cycle_length_lb"])
+                    cycle_length_ub = float(row["cycle_length_ub"])
+                    cycle_lengths = sorted({cycle_length_lb, cycle_length_ub})
+                except (ValueError, TypeError):
+                    cycle_lengths = [1.0]
+
+                # For each cycle_length variant, build a component vector
+                # All vectors for this timing_sequence use the block's tseq (last_day)
+                # Example with mismatch: DrugA allDays=[1,2,3] vs DrugB allDays=[10,11]
+                #   - Block tseq = 11
+                #   - DrugA vector: [1,1,1,0,0,0,0,0,0,0,0]
+                #   - DrugB vector: [0,0,0,0,0,0,0,0,0,1,1]
+                for cycle_len in cycle_lengths:
+                    vec = self._build_vector_from_idays(
+                        idays=idays,
+                        tseq=tseq,
+                        group_id=group_id,
+                        drug=drug,
+                        timing_sequence=timing_seq_str,
+                    )
+
+                    # Store vector with timing_seq key for tracking which block it came from
+                    component_vectors.setdefault(drug, []).append(
+                        (timing_seq_str, vec)
+                    )
+
+        # Generate regimen strings from all component vectors
+        # normalize_multicycle_spans groups vectors by length and creates @cycleLen{L} keys
+        # for vectors of different lengths (from different timing_sequences or cycle variants)
+        # validate_and_split_variants returns one dict per unique vector length
+        # collapse_event_matrix converts each dict into one regimen string
+        reg_strings = create_reg_string(component_vectors, self.logger)
+        self._log_reg_counts(group, reg_strings)
+
+        # Repeat the group N times (N = number of regimen strings generated)
+        group_repeated = pl.concat([group] * len(reg_strings), how="vertical")
+
+        # Create regString column: repeat each regimen string by group height
+        reg_string_col = (
+            pl.Series("regString", reg_strings)
+            .repeat_by(group.height)
+            .explode()
         )
 
-        lb_not_maching_ub = self.get_cycle_length_mismatch_regimens(df)
-        # Log unique resgimen counts per category
-        self.logger.info(f"[REPORT] Unique regimens (only brackets): {df.filter(mask_only)['regimen'].unique().height}")
-        self.logger.info(f"[REPORT] Unique regimens (mixed brackets): {df.filter(mask_mixed)['regimen'].unique().height}")
-        self.logger.info(f"[REPORT] Unique regimens (other): {df.filter(mask_other)['regimen'].unique().height}")
-        self.logger.info(f"[REPORT] Unique regimens (patch_mask): {df.filter(patch_mask)['regimen'].unique().height}")
-        self.logger.info(f"[REPORT] Unique regimens (ub_not_lb): {lb_not_maching_ub}")
+        # Determine cycle length for each regimen string
+        # When group spans multiple timing_sequences with different tseqs:
+        # - normalize_multicycle_spans creates separate @cycleLen{L} keys
+        # - Each key generates one regimen string
+        # - That regimen string's cycle length = the tseq of its vector length
+        # For now: use max(tseqs) as safe upper bound
+        # TODO: Track which tseq produced which regimen string for precise mapping
+        all_tseqs = [self._infer_block_tseq(block) for _, block in group.group_by("timing_sequence", maintain_order=True)]
+        cycle_length_value = max(all_tseqs) if all_tseqs else 1
+
+        # Create cycleLength column: repeat the cycle length for each regimen string
+        cycle_length_col = (
+            pl.Series("cycleLength", [cycle_length_value] * len(reg_strings))
+            .repeat_by(group.height)
+            .explode()
+        )
+
+        return group_repeated.with_columns(
+            [reg_string_col, cycle_length_col]
+        )
 
     def process(self):
         print(f"SRE - Frame size: {self.frame.shape}")
-        group_cols = ["regimen_cui", "variant_cui", "condition_cui"]
-        group_names = ["regimen", "variant", "condition"]
-        assert all(col in self.frame.columns for col in group_cols), "⚠️ Missing group column(s)"
 
-        n_groups = self.frame.select(group_cols).unique().height
+        assert all(c in self.frame.columns for c in GROUP_KEYS)
 
-        tracker = {"Total": n_groups, "Skipped_groups": 0}
-
-        progress = tqdm(total=n_groups, desc="Processing groups", dynamic_ncols=True)
         results = []
+        progress = tqdm(
+            total=self.frame.select(GROUP_KEYS).unique().height,
+            desc="Processing groups",
+            dynamic_ncols=True,
+        )
 
-        for group_key, group_df in self.frame.group_by(group_cols, maintain_order=True):
+        for group_key, group_df in self.frame.group_by(GROUP_KEYS, maintain_order=True):
             if group_key == (None, None, None):
-                print("⚠️ Skipping group with key (None, None, None)")
-                tracker['Skipped_groups'] += 1
                 continue
+
+            # Log group key for tracking which group is being processed
+            self.logger.info(f"Processing group: regimen_cui={group_key[1]}, variant_key={group_key[2]}, condition_cui={group_key[0]}")
             
-            start_time = time.time()
             processed = self._process_group(group_df)
             results.append(processed)
             progress.update(1)
-            duration = time.time() - start_time
-            if duration > 5:
-                print(f"[WARN] Slow group {group_key} took {duration:.2f}s — breaking for debug.")
-                break
 
         progress.close()
 
-        # Log tracker summary to INFO log
-        tracker_summary = "\n".join([f"{k}: {v}" for k, v in tracker.items()]) # not needed probably
-        self.logger.info("--- Tracker Summary: ---\n" + tracker_summary)
-
         if results:
-            self.frame = pl.concat(results)
-            self.frame = self.frame.filter(pl.col("regString").is_not_null())
-            self.frame = self.frame.to_pandas()
-
-
+            self.frame = (
+                pl.concat(results)
+                .filter(pl.col("regString").is_not_null()) # what does this serve? if there are regStrings nulls I want to know about
+                .to_pandas()
+            )
+            print(f"SRE - Processed frame size: {self.frame.shape}")
