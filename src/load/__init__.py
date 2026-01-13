@@ -2,7 +2,7 @@ import os
 import importlib.util
 
 # Load `preprocessing` from sibling `preproc.py` (the file, not the package)
-mod_path = os.path.join(os.path.dirname(__file__), "..", "preproc.py")
+mod_path = os.path.join(os.path.dirname(__file__), "..", "load.py")
 mod_path = os.path.abspath(mod_path)
 
 spec = importlib.util.spec_from_file_location("preproc_runner", mod_path)

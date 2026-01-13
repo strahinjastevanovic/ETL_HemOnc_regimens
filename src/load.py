@@ -1,4 +1,4 @@
-from pipeline.main import Preprocessor
+from load.main import Preprocessor
 
 def preprocessing(
     sigs_file=".",
@@ -8,7 +8,7 @@ def preprocessing(
     sheet_config=None,
 ):
 
-    print("[INFO] Starting preprocessing run...")
+    print("[INFO] Processing data...")
     proc = Preprocessor(
         sigs_path=sigs_file,
         output_dir=output_dir,

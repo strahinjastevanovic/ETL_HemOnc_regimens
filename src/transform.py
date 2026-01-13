@@ -1,6 +1,6 @@
 from tqdm import tqdm
-from tools.SRE import RegStringHandler  
-from tools.collapse_seq_naive import collapse
+from tools.SRE import SREModule  
+from tools.seq_collapse import collapse_naive, filter_et
 import os
 import logging
 
@@ -75,14 +75,15 @@ class Logger():
 class FrameProcessor:
     def run(self, path_file, logs_dir):
         """SRE endpoint"""
-        handler = RegStringHandler(path_file, log_dir=logs_dir)
+        handler = SREModule(path_file, log_dir=logs_dir)
         handler.process()
         return handler.frame
 
 
 class FrameSanitizer:
-    def collapse_short_strings(self, df):
-        df['shortString'] = df['regString'].apply(collapse)
+    def make_short_strings(self, df):
+        # Apply filter_et to regString, then collapse_naive to get shortString
+        df['shortString'] = df['regString'].apply(lambda x: collapse_naive(filter_et(x)))
         return df
 
     def rename_columns(self, df):
@@ -108,7 +109,7 @@ class FrameSanitizer:
             "component",
             # "day",
             # "cycleTaken",
-            # "cycleLength",
+            "cycleLength",
             # "noCycles",
             # "branchInfo",
             # "Radio.Therapy.",
@@ -158,7 +159,7 @@ class Transform:
 
         frame = self.processor.run(sigs_path, logs_dir)
         frame = self.sanitizer.validate_fields(frame)
-        frame = self.sanitizer.collapse_short_strings(frame)
+        frame = self.sanitizer.make_short_strings(frame)
         frame = self.sanitizer.rename_columns(frame)
         frame = self.sanitizer.select_columns(frame)
 
