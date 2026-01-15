@@ -1,6 +1,7 @@
 from tqdm import tqdm
 from tools.SRE import SREModule  
 from tools.seq_collapse import collapse_naive, filter_et
+from tools.regimen_formatter import build_final_regimens, analyze_shortstring_regimen_mapping
 import os
 import logging
 
@@ -127,58 +128,62 @@ class FrameSanitizer:
             raise ValueError("No regString created.")
         return df
 
-
-class Deduplicator:
-    def per_condition(self, df):
-        return (
-            df.sort_values(by=["shortString", "condition"], ascending=[True, False])
-              .groupby("condition", group_keys=False)
-              .apply(lambda g: g.drop_duplicates(subset="shortString", keep="first"))
-        )
-
-    def global_unique(self, df):
-        return (
-            df.sort_values(by=["shortString", "condition"], ascending=[True, False])
-              .drop_duplicates(subset="shortString", keep="first")
-        )
-
-
 class Transform:
     def __init__(self, ):
         self.processor = FrameProcessor()
         self.sanitizer = FrameSanitizer()
-        self.dedup = Deduplicator()
         self.logger = Logger()
 
-    def run(self, sigs_path="results/s_frame.parquet", output_path="results/regimens_nsclc.tsv",logs_dir="logs"):
+    def run(
+        self,
+        sigs_path="results/s_frame.parquet",
+        output_path="results/regimens_nsclc.tsv",
+        logs_dir="logs"
+    ):
         print("\n --- Running Transformation Process... --- \n")
-        
+
         os.makedirs(logs_dir, exist_ok=True)
         workdir = os.path.dirname(output_path)
         self.logger.set_logs_output(logs_dir)
 
+        # ---- SKIP IF OUTPUT EXISTS AND NON-EMPTY ----
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            self.logger.logger.info(
+                f"[SKIP] Output already exists and is non-empty: {output_path}"
+            )
+            print("--- Transform skipped (output already exists) ---")
+            return 1
+
+        # ---- build base frame ----
         frame = self.processor.run(sigs_path, logs_dir)
         frame = self.sanitizer.validate_fields(frame)
         frame = self.sanitizer.make_short_strings(frame)
         frame = self.sanitizer.rename_columns(frame)
         frame = self.sanitizer.select_columns(frame)
 
+        # ---- logging / diagnostics ----
         self.logger.log_reports_and_sumstats(frame)
         self.logger.short_string_stats(frame)
 
-        # raw checkpoint
-        frame.to_csv(f"{workdir}/frame.checkpoint.tsv", sep='\t')
+        # ---- RAW OUTPUT (unchanged, for audit/debug) ----
+        raw_path = f"{workdir}/regimens_raw.tsv"
+        frame.to_csv(raw_path, sep="\t", index=False)
+        self.logger.logger.info(f"[RAW OUTPUT] Saved to {raw_path} ({frame.shape[0]} rows)")
 
-        # final out 
-        per_condition = self.dedup.per_condition(frame)
-        per_condition.to_csv(output_path.replace(".tsv", "_full.tsv"), sep='\t', index=False)
+        # ---- SMART REGIMENS (authoritative) ----
+        analyze_shortstring_regimen_mapping(frame, logs_dir)
 
-        global_unique = self.dedup.global_unique(frame)
-        global_unique.to_csv(output_path, sep='\t', index=False)
+        final_regimens = build_final_regimens(frame, logs_dir)
+        final_regimens.to_csv(output_path, sep="\t", index=False)
+
+        self.logger.logger.info(
+            f"[REGIMENS OUTPUT] Smart format saved to {output_path} "
+            f"({final_regimens.shape[0]} rows)"
+        )
 
         print("--- Transform Process Completed Successfully! ---")
 
-## Example run 
-def test():
+
+def interface():
     transform = Transform()
     transform.run(logs_dir="logs")   

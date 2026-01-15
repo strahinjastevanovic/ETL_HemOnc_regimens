@@ -1,9 +1,9 @@
-from load.log import Logger
-from load.audit import (
+from process.log import Logger
+from process.audit import (
     AuditColumnTypes,
     Tracker
 )
-from load.handlers import (
+from process.handle import (
     Frame,
     NullValueHandlers,
     RegimenHandler,
@@ -11,8 +11,8 @@ from load.handlers import (
     PatternHandlers,
     SupplementaryHandler,
 )
-from load.report import Reporter, build_reports
-from load.resolvers import (
+from process.report import Reporter, build_reports
+from process.resolve import (
     ResolverAllDays,
     ResolverIndefinite,
     ResolverParted,

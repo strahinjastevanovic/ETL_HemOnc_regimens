@@ -25,7 +25,7 @@ This step applies logic for **regimen strings** creation, which represent ordere
 ### SRE Module 
 
 _Class: `SREModule`_  
-_Module `sre_tools`_
+_Module `sre_impl`_
 
 The **SRE module** is responsible for translating raw treatment data into ordered, time-aware **regimen strings**. It is designed with an intent to capture both continuous and cyclical regimen forms. The formatting process leads to creation "short string" which is regimen data stored as alignment-ready representation object.
 

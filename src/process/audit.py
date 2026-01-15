@@ -1,4 +1,4 @@
-from load.log import Logger 
+from process.log import Logger 
 
 from itertools import combinations
 import json

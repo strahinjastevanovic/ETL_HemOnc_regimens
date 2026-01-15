@@ -39,7 +39,7 @@ REF_RGROUPS="${REF_DIR}/rgroups_template.tsv"
 REF_VALIDDRUGS="${REF_DIR}/validdrugs_template.tsv"
 SUPP_FILE="${REF_DIR}/blacklist.json"
 REGIMEN_TSV="${WORKDIR}/regimens.tsv"
-REGIMEN_TSV_FULL="${WORKDIR}/regimens_full.tsv"
+REGIMEN_TSV_FULL="${WORKDIR}/regimens_raw.tsv"
 LOGS="${WORKDIR}/logs"
 SHEET_CONFIG="${REF_DIR}/sheets_config.json"
 
@@ -73,7 +73,7 @@ echo -e "\n%%% Pre-processing... %%%\n"
 python3 - <<EOF
 import sys
 sys.path.insert(0, "${SRC_DIR}")
-from load import preprocessing
+from process import preprocessing
 if __name__ == "__main__":
     preprocessing("${WORKDIR}/sigs_w_conditions.csv", "${WORKDIR}", "${LOGS}", "${SUPP_FILE}", "${SHEET_CONFIG}")
 EOF
@@ -92,25 +92,16 @@ echo -e "\n%%% Generating updated regimen groups and valid drugs... %%%\n"
 python3 - <<EOF
 import sys
 sys.path.insert(0, "${SRC_DIR}")
-from serialize import generate_reg_group, generate_valid_drugs 
+from data_model import generate_reg_group, generate_valid_drugs 
 if __name__ == "__main__":
     generate_reg_group("${REGIMEN_TSV_FULL}", "${REF_RGROUPS}", workdir="${WORKDIR}")
     generate_valid_drugs("${REGIMEN_TSV_FULL}", "${WORKDIR}/drug_concepts.csv", workdir="${WORKDIR}")
 EOF
 
-echo -e "\n%%% Converting TSVs to RDA... %%%\n"
-Rscript - <<EOF
-regimens <- read.delim("${WORKDIR}/regimens.tsv", stringsAsFactors = FALSE)
-save(regimens, file = "${WORKDIR}/regimens.rda")
-
-validdrugs <- read.delim("${WORKDIR}/validdrugs.tsv", stringsAsFactors = FALSE)
-save(validdrugs, file = "${WORKDIR}/validdrugs.rda")
-
-regimengroups <- read.delim("${WORKDIR}/regimengroups.tsv", stringsAsFactors = FALSE)
-save(regimengroups, file = "${WORKDIR}/regimengroups.rda")
-EOF
-
 echo -e "\n%%% Running Validation... %%%\n"
 python3 "${SRC_DIR}/validate.py" "${WORKDIR}" "${REGIMEN_TSV_FULL}"
+
+echo -e "\n%%% Serializing (RDA)... %%%\n"
+Rscript "${SRC_DIR}/export_artifacts.R" "${SRC_DIR}" "${WORKDIR}"
 
 echo -e "\n%%% Done. Outputs saved in: $WORKDIR %%%\n"

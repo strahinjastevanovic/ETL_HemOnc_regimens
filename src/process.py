@@ -1,4 +1,4 @@
-from load.main import Preprocessor
+from process.main import Preprocessor
 
 def preprocessing(
     sigs_file=".",
