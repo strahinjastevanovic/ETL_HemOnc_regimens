@@ -1,6 +1,7 @@
 save_regimen_bundle <- function(workdir) {
+  # 1. Load and bundle the main regimen data
   regimens <- read.delim(file.path(workdir, "regimens.tsv"), stringsAsFactors = FALSE)
-  drugs <- read.delim(file.path(workdir, "regimens_drugs.tsv"), stringsAsFactors = FALSE)
+  drugs    <- read.delim(file.path(workdir, "regimens_drugs_deploy.tsv"), stringsAsFactors = FALSE)
 
   save(
     regimens,
@@ -8,21 +9,24 @@ save_regimen_bundle <- function(workdir) {
     file = file.path(workdir, "regimens.rda")
   )
 
+  # 2. Process supporting files using the workdir variable
+  validdrugs <- read.delim(file.path(workdir, "validdrugs.tsv"), stringsAsFactors = FALSE)
+  save(validdrugs, file = file.path(workdir, "validdrugs.rda"))
+  
+  regimengroups <- read.delim(file.path(workdir, "regimengroups.tsv"), stringsAsFactors = FALSE)
+  save(regimengroups, file = file.path(workdir, "regimengroups.rda"))
+
   invisible(TRUE)
 }
 
 if (!interactive()) {
   args <- commandArgs(trailingOnly = TRUE)
+  
+  # Check for exactly one argument
   if (length(args) != 1) {
-    stop("Usage: Rscript save_regimen_bundle.R <WORKDIR>")
+    stop("Usage: Rscript export_artifacts.R <WORKDIR>")
   }
   
-  save_regimen_bundle(args[[1]])
-  
-  validdrugs <- read.delim("${WORKDIR}/validdrugs.tsv", stringsAsFactors = FALSE)
-  save(validdrugs, file = "${WORKDIR}/validdrugs.rda")
-  
-  regimengroups <- read.delim("${WORKDIR}/regimengroups.tsv", stringsAsFactors = FALSE)
-  save(regimengroups, file = "${WORKDIR}/regimengroups.rda")
-  
+  # Pass the single argument (WORKDIR) to the function
+  save_regimen_bundle(args[1])
 }

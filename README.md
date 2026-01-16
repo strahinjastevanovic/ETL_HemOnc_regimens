@@ -15,5 +15,5 @@ See `.env.template`.
 Create regimens with the following command:
 
 ```
-./MAIN.sh -out output-assembled
+./RunScript.sh -out output-assembled
 ```

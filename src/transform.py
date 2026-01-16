@@ -1,5 +1,5 @@
 from tqdm import tqdm
-from tools.SRE import SREModule  
+from tools.sre import SREModule  
 from tools.seq_collapse import collapse_naive, filter_et
 from tools.regimen_formatter import build_final_regimens, analyze_shortstring_regimen_mapping
 import os
@@ -95,31 +95,31 @@ class FrameSanitizer:
             "condition_cui" : "conditionCode"
         })
 
-    def select_columns(self, df):
+    def add_metacondition(self, df):
         df["metaCondition"] = "all" 
-        cols = [ 
-            # "regCodeExt",
-            "metaCondition",
-            "condition",
-            "conditionCode",
-            # "context",
-            # "contextCode",
-            "regName",
-            "variant",
-            "regCode",
-            "component",
-            # "day",
-            # "cycleTaken",
-            "cycleLength",
-            # "noCycles",
-            # "branchInfo",
-            # "Radio.Therapy.",
-            # "continuous",
-            # "noCycles_Original",
-            "regString",
-            "shortString"
-            ]  
-        return df[cols]
+        return df
+
+    regimens2Hemonc = {
+            "conditionCode" : "condition_cui",
+            "regName" : "regimen",
+            "regCode" : "regimen_cui",
+            "componentCode": "component_cui",
+            "regCodeExt": None,
+            "context" : None,
+            "contextCode" : None,
+            "day": None,
+            "cycleTaken":None,
+            "noCycles":None,
+            "branchInfo":None,
+            "Radio.Therapy.":None,
+            "continuous":None,
+            "noCycles_Original":None,
+    }
+
+    def translate(self, df):
+        # select and rename columns to hemonc standard
+        cols_to_translate = {v:k for k,v in self.regimens2Hemonc.items() if v is not None}
+        return df.rename(columns=cols_to_translate)
 
     def validate_fields(self, df):
         if df.empty:
@@ -133,21 +133,48 @@ class Transform:
         self.processor = FrameProcessor()
         self.sanitizer = FrameSanitizer()
         self.logger = Logger()
+        self.selected_columns = [
+                "metaCondition",
+                "condition",
+                "conditionCode",
+                "regName",
+                "variant",
+                "regCode",
+                "component",
+                "cycleLength",
+                "regString",
+                "shortString"
+            ]
+        self.selected_columns_raw = [
+                "metaCondition",
+                "condition",
+                "conditionCode",
+                "regName",
+                "variant",
+                "regCode",
+                "component",
+                "componentCode",
+                "cycleLength",
+                "route",
+                "regString",
+                "shortString",
+            ]
 
     def run(
         self,
         sigs_path="results/s_frame.parquet",
         output_path="results/regimens_nsclc.tsv",
-        logs_dir="logs"
+        logs_dir="logs",
+        debug=False,
     ):
-        print("\n --- Running Transformation Process... --- \n")
+        print("--- Running Transformation Process. Use debug=True to speedup. ---")
 
         os.makedirs(logs_dir, exist_ok=True)
         workdir = os.path.dirname(output_path)
         self.logger.set_logs_output(logs_dir)
 
         # ---- SKIP IF OUTPUT EXISTS AND NON-EMPTY ----
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 0 and debug:
             self.logger.logger.info(
                 f"[SKIP] Output already exists and is non-empty: {output_path}"
             )
@@ -159,7 +186,8 @@ class Transform:
         frame = self.sanitizer.validate_fields(frame)
         frame = self.sanitizer.make_short_strings(frame)
         frame = self.sanitizer.rename_columns(frame)
-        frame = self.sanitizer.select_columns(frame)
+        frame = self.sanitizer.translate(frame)
+        frame = self.sanitizer.add_metacondition(frame)
 
         # ---- logging / diagnostics ----
         self.logger.log_reports_and_sumstats(frame)
@@ -167,14 +195,14 @@ class Transform:
 
         # ---- RAW OUTPUT (unchanged, for audit/debug) ----
         raw_path = f"{workdir}/regimens_raw.tsv"
-        frame.to_csv(raw_path, sep="\t", index=False)
+        frame[self.selected_columns_raw].to_csv(raw_path, sep="\t", index=False)
         self.logger.logger.info(f"[RAW OUTPUT] Saved to {raw_path} ({frame.shape[0]} rows)")
 
         # ---- SMART REGIMENS (authoritative) ----
         analyze_shortstring_regimen_mapping(frame, logs_dir)
 
         final_regimens = build_final_regimens(frame, logs_dir)
-        final_regimens.to_csv(output_path, sep="\t", index=False)
+        final_regimens[self.selected_columns].to_csv(output_path, sep="\t", index=False)
 
         self.logger.logger.info(
             f"[REGIMENS OUTPUT] Smart format saved to {output_path} "

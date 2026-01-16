@@ -17,7 +17,7 @@ def generate_reg_group(regimen_tsv, ref_reggroups, workdir="."):
     """
     
     # Initialize logger
-    logger = Logger(f"{workdir}/logs", filename="serialize.log")
+    logger = Logger(f"{workdir}/logs", filename="lineage.log")
     
     logger.info(f"\n[REG GROUP ASSIGNMENT] Processing regimen group mappings")
 
@@ -85,19 +85,17 @@ VALID_DRUGS_RELMAP = {
     "Manual_Req": "invalid_reason",
 }
 
-def include_route_info(regimens_tsv_full, validdrugs):
+def generate_route_table(regimens_tsv_full, workdir="."):
     """
-    Include route information in the valid drugs dataframe, exploded by route per component.
+    Include route information in `drugs` dataframe, exploded by route per component.
+    Note: Serialized under regimens.drugs object
     
     Maps unique routes for each component from the full regimen table. Output is one row
     per drug-route combination, preserving regimen context and component mapping.
     
-    Parameters:
-    regimens_tsv_full (pd.DataFrame): Full regimen dataframe with 'component', 'component_cui', 'route', 'regName' columns.
-    validdrugs (pd.DataFrame): Valid drugs dataframe with component mappings.
     
     Returns:
-    pd.DataFrame: Valid drugs dataframe exploded by route with one row per drug-route pair.
+    pd.DataFrame: drugs.dataframe exploded by route with one row per drug-route pair.
     
     Output structure:
         component_cui | name | route | regimen
@@ -108,22 +106,59 @@ def include_route_info(regimens_tsv_full, validdrugs):
         DrugC         | ...  | Not specified | ...
     """
     # Get component name to cui mapping from regimens
-    component_name_to_cui = (
-        regimens_tsv_full[['component', 'component_cui']]
+     # Initialize logger
+    logger = Logger(f"{workdir}/logs", filename="lineage.log")
+    
+    logger.info(f"\n[ROUTE ASSIGNMENT] Processing regimen group mappings")
+
+    # Load final table from ETL pipeline
+    df = pd.read_csv(regimens_tsv_full, sep='\t')
+
+    component2CUI = (
+        df[['component', 'componentCode']]
         .drop_duplicates()
-        .set_index('component')['component_cui']
+        .set_index('component')['componentCode']
         .to_dict()
     )
     
     # Build route data: for each component, extract unique routes and regimen contexts
     route_data = []
+    logger = Logger(f"{workdir}/logs", filename="lineage.log")
+
     
-    for component_name, cui in component_name_to_cui.items():
+    for component_name, cui in component2CUI.items():
         # Get all rows for this component
-        component_rows = regimens_tsv_full[regimens_tsv_full['component'] == component_name]
+        component_rows = df[df['component'] == component_name]
         
         # Extract unique route-regimen pairs for this component
         route_regimen_pairs = component_rows[['route', 'regName']].drop_duplicates()
+
+        # log if duplicates found - component_name, cui - 
+        # => if duplicate route regName pairs exist 
+        # component route regName other columns missmatch (considered artifacts and removed)
+        # only care for rout of compounend in specific regimen
+        if len(component_rows) > len(route_regimen_pairs):
+            logger.info(
+                f"[ROUTE EXPLOSION] Component '{component_name}' (CODE: {cui}) "
+                f"has {len(component_rows)} rows but {len(route_regimen_pairs)} unique route-regimen pairs."
+            )
+
+            duplicated = component_rows.duplicated(subset=['route', 'regName'], keep=False)
+            dup_rows = component_rows[duplicated]
+
+            dup_summary = (
+                dup_rows
+                .groupby(['route', 'regName'])
+                .size()
+                .reset_index(name='count')
+                .to_dict(orient='records')
+            )
+
+            logger.info(
+                f"[ROUTE EXPLOSION DETAILS] Component '{component_name}' (CUI: {cui}) "
+                f"duplicate route-regimen pairs: {dup_summary}"
+            )
+            
         
         # Filter out null/placeholder routes
         exclude_routes = {"Not specified", "nan", None, ""}
@@ -143,30 +178,25 @@ def include_route_info(regimens_tsv_full, validdrugs):
             # Add each unique route-regimen pair
             for _, row in route_regimen_pairs.iterrows():
                 route_data.append({
-                    'component_cui': cui,
-                    'component_name': component_name,
+                    'cui': cui,
+                    'drug': component_name,
                     'route': row['route'],
                     'regimen': row['regName']
                 })
     
     # Create route dataframe
     route_df = pd.DataFrame(route_data)
+
+    logger.info(
+                f"[LINEAGE] - Routes export to {workdir}/regimens_drugs.tsv "
+            )
+    route_df.to_csv(f"{workdir}/regimens_drugs.tsv", sep='\t', index=False)
     
-    # Merge with validdrugs on component_cui
-    # validdrugs should have one row per component; we'll join and explode by route
-    result = validdrugs.merge(
-        route_df[['component_cui', 'route', 'regimen']],
-        on='component_cui',
-        how='left'
-    )
-    
-    # Fill null routes with "Not specified"
-    result['route'] = result['route'].fillna('Not specified')
-    
-    # Drop duplicates that may arise from the merge
-    result = result.drop_duplicates(subset=['component_cui', 'route', 'regimen'], keep='first')
-    
-    return result
+    route_df_deploy = route_df[["regimen", "drug", "route"]]
+
+    route_df_deploy.to_csv(f"{workdir}/regimens_drugs_deploy.tsv", sep='\t', index=False)
+
+    return route_df
 
 def generate_valid_drugs(regimen_tsv, validdrugs_query, workdir="."):
     """
@@ -199,7 +229,7 @@ def generate_valid_drugs(regimen_tsv, validdrugs_query, workdir="."):
     unmapped_count = len(unmapped_components)
 
     # Initialize logger
-    logger = Logger(f"{workdir}/logs", filename="serialize.log")
+    logger = Logger(f"{workdir}/logs", filename="lineage.log")
     
     # Log validation summary
     logger.info(f"\n[VALIDATION] Valid Drugs Component Mapping")
@@ -241,19 +271,14 @@ def generate_valid_drugs(regimen_tsv, validdrugs_query, workdir="."):
     vd_query = vd_query[out_cols]
 
     logger.info(f"\n[INFO] Valid drugs output columns: {out_cols}")
-    logger.info(f"[INFO] Valid drugs table shape before route explosion: {vd_query.shape}")
-    
-    # Include route information from regimens (exploded by route-regimen pair)
-    vd_complete = include_route_info(fin, vd_query)
-    
-    logger.info(f"[INFO] Valid drugs table shape after route explosion: {vd_complete.shape}")
-    logger.info(f"[INFO] Output columns: {vd_complete.columns.tolist()}")
+    logger.info(f"[INFO] Valid drugs table shape: {vd_query.shape}")
+    logger.info(f"[INFO] Output columns: {vd_query.columns.tolist()}")
 
     # Save output
-    vd_complete.to_csv(f"{workdir}/validdrugs.tsv", sep='\t', index=False)
-    logger.info(f"[INFO] Valid drugs table saved to {workdir}/validdrugs.tsv ({vd_complete.shape[0]} rows)")
+    vd_query.to_csv(f"{workdir}/validdrugs.tsv", sep='\t', index=False)
+    logger.info(f"[INFO] Valid drugs table saved to {workdir}/validdrugs.tsv ({vd_query.shape[0]} rows)")
     
-    return vd_complete
+    return vd_query
 
 
 

@@ -58,7 +58,7 @@ def build_final_regimens(frame, logs_dir="logs"):
     # Log undefined condition statistics
     if not undefined_regimens.empty:
         logger.warning(f"\n[WARNING] Found {len(undefined_regimens)} rows with undefined conditions")
-        logger.warning(f"[INFO] Unique undefined regimens: {undefined_regimens['regName'].nunique()}")
+        logger.warning(f"[INFO] Unique condition-unknown regimens: {undefined_regimens['regName'].nunique()}")
         undefined_regs = undefined_regimens['regName'].unique().tolist()
         for reg in sorted(undefined_regs):
             count = len(undefined_regimens[undefined_regimens['regName'] == reg])

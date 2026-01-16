@@ -105,4 +105,4 @@ Example log entry:
 
 ## Notes
 - Fixed data file loading in serialize.py to properly handle CSV/TSV input.
-- All blocks of data_model.py reviewed and updated with consistent error handling.
+- All blocks of serialize.py reviewed and updated with consistent error handling.
