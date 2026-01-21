@@ -96,11 +96,12 @@ echo -e "\n%%% Materializing Data Assets... %%%\n"
 python3 - <<EOF
 import sys
 sys.path.insert(0, "${SRC_DIR}")
-from data_model import generate_reg_group, generate_valid_drugs, generate_route_table
+from data_model import generate_reg_group, generate_valid_drugs, generate_route_table, generate_shortString_table
 if __name__ == "__main__":
     generate_reg_group("${REGIMEN_TSV_FULL}", "${REF_RGROUPS}", workdir="${WORKDIR}")
     generate_valid_drugs("${REGIMEN_TSV_FULL}", "${WORKDIR}/drug_concepts.csv", workdir="${WORKDIR}")
     generate_route_table("${REGIMEN_TSV_FULL}", workdir="${WORKDIR}")
+    generate_shortString_table("${REGIMEN_TSV_FULL}", workdir="${WORKDIR}")
 
 EOF
 

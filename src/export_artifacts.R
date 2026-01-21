@@ -2,10 +2,12 @@ save_regimen_bundle <- function(workdir) {
   # 1. Load and bundle the main regimen data
   regimens <- read.delim(file.path(workdir, "regimens.tsv"), stringsAsFactors = FALSE)
   drugs    <- read.delim(file.path(workdir, "regimens_drugs_deploy.tsv"), stringsAsFactors = FALSE)
-
+  shortStrings <- read.delim(file.path(workdir, "regimens_shortStrings.tsv"), stringsAsFactors = FALSE)
+  
   save(
     regimens,
     drugs,
+    shortStrings, 
     file = file.path(workdir, "regimens.rda")
   )
 

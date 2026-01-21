@@ -198,6 +198,44 @@ def generate_route_table(regimens_tsv_full, workdir="."):
 
     return route_df
 
+def generate_shortString_table(regimens_tsv_full, workdir="."):
+    """
+    
+
+    Returns:
+    pd.DataFrame: shortString.dataframe exploded by route with one row per drug-route pair.
+    
+    Output structure:
+        shortString (many) | regimen (name) | condition (name) 
+        STR001            | RegName1       | ConditionA
+        STR002            | RegName2       | ConditionA
+        STR003            | RegName2       | ConditionB
+    """
+    # Get component name to cui mapping from regimens
+    
+     # Initialize logger
+    logger = Logger(f"{workdir}/logs", filename="lineage.log")
+
+    # Load final table from ETL pipeline
+    df = pd.read_csv(regimens_tsv_full, sep='\t')
+
+    # Create the original index
+    shortString_df = df.groupby("shortString")[['regName', 'condition']].value_counts().reset_index().rename(columns={"count":"repeats", "regName":"regimen"})
+    shortString_id_map = shortString_df.reset_index().groupby("shortString")["index"].first()
+    codes, unique_strings = pd.factorize(shortString_df['shortString'])
+    # Map the 0-based codes to a 1-based ID by adding 1 to every code
+    # This creates a new 'ID' series that perfectly aligns with shortString_df rows
+    sequential_1_based_ids = codes + 1
+    shortString_df.insert(0, 'shortString_ID', sequential_1_based_ids)
+    
+    logger.info(
+                f"[LINEAGE] - shortString export to {workdir}/regimens_shortStrings.tsv "
+            )
+    shortString_df.to_csv(f"{workdir}/regimens_shortStrings.tsv", sep='\t', index=False)
+
+    return shortString_df
+
+
 def generate_valid_drugs(regimen_tsv, validdrugs_query, workdir="."):
     """
     Creates a valid drugs dataset by remapping query_table to output valid drugs table.
