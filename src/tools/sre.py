@@ -9,7 +9,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent.resolve()))
 
-from sre_tools import (
+from sre_impl import (
     get_last_cycle,
     convert_to_days,
     get_idays,
@@ -258,9 +258,10 @@ class SREModule:
             .explode()
         )
 
-        return group_repeated.with_columns(
-            [reg_string_col, cycle_length_col]
-        )
+        return group_repeated.with_columns([
+            reg_string_col,
+            cycle_length_col
+        ])
 
     def process(self):
         print(f"SRE - Frame size: {self.frame.shape}")
@@ -288,6 +289,7 @@ class SREModule:
         progress.close()
 
         if results:
+            print("SRE - Sampled:", type(results), type(results[0]), len(results))
             self.frame = (
                 pl.concat(results)
                 .filter(pl.col("regString").is_not_null()) # what does this serve? if there are regStrings nulls I want to know about

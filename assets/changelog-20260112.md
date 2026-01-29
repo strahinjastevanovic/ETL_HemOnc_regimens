@@ -100,7 +100,7 @@ Both are appended to component_vectors["Paclitaxel"] with the same timing_seq ta
 
 ### Variant Type 2: Vector Length Variants (@cycleLen suffixes)
 
-Handled by `normalize_multicycle_spans()` in sre_tools. When a component has different idays patterns across rows within a block, the system creates separate @cycleLen{L} keys (where L is the vector length). These are later stripped in `collapse_event_matrix()` to produce clean output.
+Handled by `normalize_multicycle_spans()` in sre_impl. When a component has different idays patterns across rows within a block, the system creates separate @cycleLen{L} keys (where L is the vector length). These are later stripped in `collapse_event_matrix()` to produce clean output.
 
 ### Variant Type 3: Timing Sequence Variants
 

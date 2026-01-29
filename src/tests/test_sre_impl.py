@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]  # .../<repo>/src
 sys.path.insert(0, str(ROOT))
 
-from tools.sre_tools import collapse_event_matrix_wrapper, collapse_event_matrix
+from tools.sre_impl import collapse_event_matrix_wrapper, collapse_event_matrix
 
 
 # TODO: Make sure examples match running tests in __file__ ?

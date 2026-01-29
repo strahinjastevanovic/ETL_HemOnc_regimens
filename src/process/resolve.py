@@ -236,7 +236,7 @@ class ResolverAllDays(Resolver):
         Irregular patterns:   -\d+ | \d+\|\d+ | \d+~\d+ | \(.*?\) | \b0\b
                                 NZ      SR       SR         BR      NZ
         Input:
-            - frame from handler (may contain irregular / misaligned allDays values)
+            - frame from handle (may contain irregular / misaligned allDays values)
         Output:
             - list of patched group DataFrames, each with normalized allDays
 

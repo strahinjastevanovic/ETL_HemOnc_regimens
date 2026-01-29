@@ -3,7 +3,7 @@ from sqlalchemy import create_engine
 import logging 
 import os
 
-from queries.vocab_query import query_valid_drugs as drugs_sql, query_conditions as condition_sql
+from queries.vocab import query_valid_drugs as drugs_sql, query_conditions as condition_sql
 
 def get_logger(log_path: str) -> logging.Logger:
     os.makedirs(os.path.dirname(log_path), exist_ok=True)  
