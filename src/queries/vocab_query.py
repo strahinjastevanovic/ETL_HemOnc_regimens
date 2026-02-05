@@ -60,3 +60,29 @@ WHERE
     AND c.domain_id = 'Drug'
     AND cr.concept_id_2 IS NOT NULL;
 """
+
+query_concepts = f"""
+SELECT DISTINCT c.concept_id, 'Drug' AS class, c.concept_name AS name
+FROM {schema}.concept c
+WHERE c.vocabulary_id = 'HemOnc'
+  AND (c.domain_id = 'Drug' OR c.concept_class_id = 'Drug')
+
+UNION ALL
+
+SELECT DISTINCT c.concept_id, 'Regimen' AS class, c.concept_name AS name
+FROM {schema}.concept c
+WHERE c.vocabulary_id = 'HemOnc'
+  AND (c.domain_id = 'Regimen' OR c.concept_class_id = 'Regimen')
+
+UNION ALL
+
+SELECT DISTINCT c.concept_id, 'Condition' AS class, c.concept_name AS name
+FROM {schema}.concept c
+WHERE c.vocabulary_id = 'HemOnc'
+  AND (c.domain_id = 'Condition' OR c.concept_class_id = 'Condition');
+"""
+query_concepts_log = f"""
+SELECT COUNT(*) AS total_hemonc_items
+FROM {schema}.concept c
+WHERE c.vocabulary_id = 'HemOnc';
+"""
