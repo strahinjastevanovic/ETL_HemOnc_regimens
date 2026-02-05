@@ -4,20 +4,18 @@ import logging
 import os
 
 from queries.vocab import query_valid_drugs as drugs_sql, query_conditions as condition_sql
+from queries.vocab import query_concepts, query_concepts_log
 
 def get_logger(log_path: str) -> logging.Logger:
-    os.makedirs(os.path.dirname(log_path), exist_ok=True)  
-
-    logger = logging.getLogger(log_path)  # use log path as name to allow multiple loggers
-    logger.setLevel(logging.INFO)
-
-    if not logger.handlers:
-        fh = logging.FileHandler(log_path, mode='w')  # overwrite each time
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        fh.setFormatter(formatter)
-        logger.addHandler(fh)
-
-    return logger
+  os.makedirs(os.path.dirname(log_path), exist_ok=True)  
+  logger = logging.getLogger(log_path)  # use log path as name to allow multiple loggers
+  logger.setLevel(logging.INFO)
+  if not logger.handlers:
+    fh = logging.FileHandler(log_path, mode='w')  # overwrite each time
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    fh.setFormatter(formatter)
+    logger.addHandler(fh)
+  return logger
 
 def log_column_differences(df, col1, col2, logger):
     logger.info("Different names in regimen (HemOnc) and regimen (Athena-OMOP):")
@@ -90,6 +88,21 @@ def run_query_valid_drugs(engine, output_file, input_file, log_dir):
   #### LOG + CLEAN
   logger = get_logger(f"{log_dir}/query.log")
   log_shape(df, "valid drugs query", logger)
+
+def run_query_concepts(engine, output_file, log_dir):
+  if os.path.exists(output_file):
+    return 1
+  # Execute and save concept data
+  df = pd.read_sql(query_concepts, engine)
+  df.to_csv(output_file, index=False, sep='\t')
+  # Execute and log HemOnc total count
+  total_df = pd.read_sql(query_concepts_log, engine)
+  total_count = total_df.iloc[0]['total_hemonc_items']
+  # Log
+  logger = get_logger(f"{log_dir}/query.log")
+  log_shape(df, "HemOnc concepts (Drug, Regimen, Condition)", logger)
+  logger.info(f"Total HemOnc items present (for q_log): {total_count}")
+
 
 def main(
     credentials = {
