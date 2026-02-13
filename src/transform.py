@@ -108,7 +108,7 @@ class FrameSanitizer:
             "component",
             # "day",
             # "cycleTaken",
-            # "cycleLength",
+            "cycleLength",
             # "noCycles",
             # "branchInfo",
             # "Radio.Therapy.",

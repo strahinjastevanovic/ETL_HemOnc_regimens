@@ -1,9 +1,9 @@
 import polars as pl
 from tqdm import tqdm
 import time
-
 from pathlib import Path 
 import sys 
+
 sys.path.insert(0, str(Path(__file__).parent.resolve()))
 
 from sre_tools import (
@@ -113,6 +113,35 @@ class RegStringHandler:
         return logger
 
 
+    def _infer_block_tseq(self, block: pl.DataFrame) -> int:
+        max_day_from_allDays = 0
+        max_day_from_meta = 0
+        for row in block.iter_rows(named=True):
+            idays = get_idays(row["allDays"])
+            if idays:
+                max_day_from_allDays = max(max_day_from_allDays, max(idays))
+        try:
+            lb = float(row["cycle_length_lb"])
+            ub = float(row["cycle_length_ub"])
+            unit = row["cycle_length_unit"]
+            meta_days = max(
+                convert_to_days(lb, unit, idays),
+                convert_to_days(ub, unit, idays),
+            )
+            max_day_from_meta = max(max_day_from_meta, meta_days)
+
+        except Exception:
+            self.logger.warning(
+            f"Failed to convert cycle lengths to days for row: \n{row}"
+            )
+
+        tseq = max(max_day_from_allDays, max_day_from_meta)
+
+        if tseq <= 0:
+            raise ValueError("Cannot infer tseq for timing_sequence block")
+
+        return int(tseq)
+    
     def _process_group(self, group: pl.DataFrame ) -> pl.DataFrame:
         """
         
@@ -214,10 +243,16 @@ class RegStringHandler:
             self.logger.error(f"[SKIPPED GROUP] Failed to create reg string {group_id} - [ERR] {e}")
             # Tag the group rows with null regString (preserving row count)
             null_col = pl.Series("regString", [None] * group.height)
-            return group.with_columns(null_col)
+            null_cycle = pl.Series("cycleLength", [None] * group.height)
+            return group.with_columns([null_col, null_cycle])
 
         # How many regStrings are we generating?
         n_strings = len(group_reg_string)
+
+        if n_strings == 0:
+            null_col = pl.Series("regString", [None] * group.height)
+            null_cycle = pl.Series("cycleLength", [None] * group.height)
+            return group.with_columns([null_col, null_cycle])
         
         if n_strings > 1:
             group_id = group.select(['condition', 'regimen', 'variant']).to_numpy()[0, :]
@@ -228,8 +263,20 @@ class RegStringHandler:
         group_repeated = pl.concat([group] * n_strings, how="vertical")
         # attach the regString column — one for each duplicate block
         reg_string_col = pl.Series("regString", group_reg_string).repeat_by(group.height).explode()
-        # final frame 
-        group_with_regstrings = group_repeated.with_columns(reg_string_col)
+        # cycle Length inference 
+        all_tseqs = [self._infer_block_tseq(block) for _, block in group.group_by("timing_sequence", maintain_order=True)]
+        cycle_length_value = max(all_tseqs) if all_tseqs else 1
+        
+        cycle_length_col = (
+            pl.Series("cycleLength", [cycle_length_value] * len(group_reg_string))
+            .repeat_by(group.height)
+            .explode()
+            )
+        # final frame
+        group_with_regstrings = group_repeated.with_columns([
+            reg_string_col,
+            cycle_length_col
+            ])
 
         return group_with_regstrings
       
