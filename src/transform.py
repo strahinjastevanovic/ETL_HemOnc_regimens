@@ -86,7 +86,6 @@ class FrameSanitizer:
         return df
 
     def rename_columns(self, df):
-        # columns name sync - format output
         return df.rename(columns={
             "regimen": "regName", 
             "regimen_cui":"regCode",
@@ -96,24 +95,14 @@ class FrameSanitizer:
     def select_columns(self, df):
         df["metaCondition"] = "all" 
         cols = [ 
-            # "regCodeExt",
             "metaCondition",
             "condition",
             "conditionCode",
-            # "context",
-            # "contextCode",
             "regName",
             "variant",
             "regCode",
             "component",
-            # "day",
-            # "cycleTaken",
             "cycleLength",
-            # "noCycles",
-            # "branchInfo",
-            # "Radio.Therapy.",
-            # "continuous",
-            # "noCycles_Original",
             "regString",
             "shortString"
             ]  
@@ -165,10 +154,8 @@ class Transform:
         self.logger.log_reports_and_sumstats(frame)
         self.logger.short_string_stats(frame)
 
-        # raw checkpoint
         frame.to_csv(f"{workdir}/frame.checkpoint.tsv", sep='\t')
 
-        # final out 
         per_condition = self.dedup.per_condition(frame)
         per_condition.to_csv(output_path.replace(".tsv", "_full.tsv"), sep='\t', index=False)
 

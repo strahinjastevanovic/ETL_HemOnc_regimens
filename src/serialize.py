@@ -14,34 +14,26 @@ def generate_reg_group(regimen_tsv, ref_reggroups, workdir="."):
     pd.DataFrame: Updated regimen groups dataframe.
     """
 
-    # Load final table from ETL object
     df = pd.read_csv(regimen_tsv, sep='\t')
 
-    # Load reference regimen groups dataset
     ref = pd.read_csv(ref_reggroups, sep='\t')
 
-    # Ensure required columns exist
     required_columns = ["Var1", "regGroup"]
     if not set(required_columns).issubset(ref.columns):
         raise ValueError(f"Missing required columns in reference file: {set(required_columns) - set(ref.columns)}")
 
-    # Normalize case and extract known regimen names
     known_var1 = set(ref["Var1"].unique())
 
-    # Extract unique regimen names from the ETL dataset
     new_regimens = set(df["regName"].unique())
 
-    # Find regimens that are not in the reference
     to_add = new_regimens.difference(known_var1)
 
-    # If there are new regimens, generate entries
     if to_add:
         new_entries = pd.DataFrame({
             "Var1": list(to_add),
             "regGroup": [random.choice(ref["regGroup"].dropna().unique()) for _ in to_add]
         })
 
-        # Concatenate new data
         updated_df = pd.concat([ref, new_entries], ignore_index=True)
     else:
         updated_df = ref
@@ -80,14 +72,12 @@ def generate_valid_drugs(regimen_tsv, validdrugs_query, workdir="."):
     pd.DataFrame: Updated valid drugs dataframe.
     """
 
-    # Load the final component table
     fin = pd.read_csv(regimen_tsv, sep='\t')
     components_lower = fin['component'].str.lower().unique().tolist()
     
     vd_query = pd.read_csv(validdrugs_query)
     vd_components_lower = vd_query['concept_name'].str.lower().unique().tolist()
 
-    # log discrepancies
     sc = set(components_lower)
     vd = set(vd_components_lower)
 
@@ -99,7 +89,6 @@ def generate_valid_drugs(regimen_tsv, validdrugs_query, workdir="."):
           f"[INFO] in Athena: {len(sc.difference(vd))}\n"
           )
     
-    # remap
     for new_col, src_col in VALID_DRUGS_RELMAP.items():
         if new_col:
             vd_query[new_col] = vd_query[src_col].values

@@ -66,6 +66,7 @@ if __name__ == "__main__":
     "${WORKDIR}/condition_concepts.csv",\
     "${WORKDIR}/drug_concepts.csv",\
     "${WORKDIR}/sigs_w_conditions.csv",\
+    "${WORKDIR}/concepts.tsv",\
     "${LOGS}")
 EOF
 
@@ -99,16 +100,7 @@ if __name__ == "__main__":
 EOF
 
 echo -e "\n%%% Converting TSVs to RDA... %%%\n"
-Rscript - <<EOF
-regimens <- read.delim("${WORKDIR}/regimens.tsv", stringsAsFactors = FALSE)
-save(regimens, file = "${WORKDIR}/regimens.rda")
-
-validdrugs <- read.delim("${WORKDIR}/validdrugs.tsv", stringsAsFactors = FALSE)
-save(validdrugs, file = "${WORKDIR}/validdrugs.rda")
-
-regimengroups <- read.delim("${WORKDIR}/regimengroups.tsv", stringsAsFactors = FALSE)
-save(regimengroups, file = "${WORKDIR}/regimengroups.rda")
-EOF
+Rscript "${SRC_DIR}/serialize.R" "${WORKDIR}"
 
 echo -e "\n%%% Running Validation... %%%\n"
 python3 "${SRC_DIR}/validate.py" "${WORKDIR}" "${REGIMEN_TSV_FULL}"

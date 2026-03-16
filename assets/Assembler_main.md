@@ -9,11 +9,9 @@ This step loads the core raw HemOnc input table — `sigs`. Additional informati
 
 In the context of condition expansion, records are exploded — meaning one input row may become many.
 
-Additionally, a **modular blacklist system** is applied to remove irrelevant or noise entries early in the pipeline. This is JSON-based, easy to expand, and helps filter invalid terms by rule or pattern.
-
 >💡 Handlers are discussed in the sections below
 
-The modular blacklist system is expanded into its own section describing handlers, reporters, and resolver classes. The components form a pipeline that seamlessly pre-processes and tracks idiosyncrasies to minimise regression errors. The reporting system runs as a side effect during the initial pipeline steps. Output of this preprocessing step:
+The data preprocessing is expanded into its own section describing handlers, reporters, and resolver classes. The components form a pipeline that seamlessly pre-processes and tracks idiosyncrasies to minimise regression errors. The reporting system runs as a side effect during the initial pipeline steps. Output of this preprocessing step:
 
 - `reports.xlsx`  
 
@@ -234,8 +232,6 @@ _Class types_
 
 
 - SupplementaryHandler  
-  - Blacklist use: applies component-level blacklist, logs dropped components and removes whole variant groups that contain any blacklisted component.  
-  - Blacklist use (regimen name): applies blacklist regexes against the regimen title and drops groups where the regimen matches forbidden patterns; reports dropped groups.  
   - Component role clean: removes variants that contain disallowed component roles (e.g., "secondary systemic", "locoregional"), reports per-role and aggregated drop statistics.
 
 - AuditColumnTypes (audit)  
@@ -256,7 +252,7 @@ _Class types_
 
 How they work together (orchestration)
 
-- Preprocessor initializes these components and runs them in a staged pipeline: supplementary/blacklist and role filters → null/value audits and regimen-level filters (RT, imbalance) → split single vs multi-part variants → resolver fixes multi-part variants → pattern handlers validate allDays/timing formats → tracking and reporting produce TSV/XLSX diagnostics. The design favors conservative drops with reporting so problematic cases can be audited and iteratively patched.
+- Preprocessor initializes these components and runs them in a staged pipeline: supplementary and role filters → null/value audits and regimen-level filters (RT, imbalance) → split single vs multi-part variants → resolver fixes multi-part variants → pattern handlers validate allDays/timing formats → tracking and reporting produce TSV/XLSX diagnostics. The design favors conservative drops with reporting so problematic cases can be audited and iteratively patched.
 
 
 ### Outputs

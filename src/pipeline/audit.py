@@ -67,24 +67,6 @@ class Tracker:
         """
         keys = ["regimen_cui", "variant_cui"]
 
-        # shared_keys = (
-        #     standard.select(keys).unique()
-        #     .join(
-        #         funny.select(keys).unique(),
-        #         on=keys,
-        #         how="inner"
-        #     )
-        # )
-
-        # if shared_keys.height > 0:
-        #     self.logger.warning(f"[AUDIT] Dropping {shared_keys.height} overlapping (regimen, variant) keys from all sets")
-        #     self.logger.warning(f"[AUDIT] Shared keys in checkpoint: {all_keys.join(shared_keys, how="inner", on=keys).shape}")
-        #     self.logger.warning(f"[AUDIT] Shared keys in standard: {standard.join(shared_keys, how="inner", on=keys).shape}")
-        #     self.logger.warning(f"[AUDIT] Shared keys in funny: {funny.join(shared_keys, how="inner", on=keys).shape}")
-        #     standard = standard.join(   shared_keys, on=keys, how="anti")
-        #     funny    = funny.join(      shared_keys, on=keys, how="anti")
-        #     all_keys = all_keys.join(   shared_keys, on=keys, how="anti")
-
         get_total_variants_of_all_regimens = lambda table: table.select(keys) \
             .unique() \
             .group_by("regimen_cui") \

@@ -60,8 +60,6 @@ class Preprocessor:
 
         # ----------- 1 level subset block -component level dropouts, variants kept ------------
         frame = self.supp_handler.clean_by_role(frame, group_keys) 
-        frame = self.supp_handler.clean_by_blacklist(frame, supplementary_file, group_keys) 
-        frame = self.supp_handler.clean_by_blacklist_regimen(frame, supplementary_file, group_keys)
 
         # ----------- 2 level subset block -regimen level dropouts ------------
         frame = self.null_handlers.handle_nan_in_condition(frame)

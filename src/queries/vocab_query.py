@@ -1,13 +1,7 @@
 # Doc: Description: "athena vocab queries" - pkg requirments - if any
-
-# backend
-
-# mapping:
-# input: INPUT_FILES_HEMONC/sigs.csv full-join regimen_cui -> concept_code many to many
-
+# input: INPUT_FILES_HEMONC/sigs.csv
 # output: sigs_conditions.csv ( optional: total number sumstats )
 
-# schema = "devv5"
 schema = "prodv5"
 
 query_conditions = f"""
@@ -61,6 +55,7 @@ WHERE
     AND cr.concept_id_2 IS NOT NULL;
 """
 
+
 query_concepts = f"""
 SELECT DISTINCT c.concept_id, 'Drug' AS class, c.concept_name AS name
 FROM {schema}.concept c
@@ -81,6 +76,7 @@ FROM {schema}.concept c
 WHERE c.vocabulary_id = 'HemOnc'
   AND (c.domain_id = 'Condition' OR c.concept_class_id = 'Condition');
 """
+
 query_concepts_log = f"""
 SELECT COUNT(*) AS total_hemonc_items
 FROM {schema}.concept c

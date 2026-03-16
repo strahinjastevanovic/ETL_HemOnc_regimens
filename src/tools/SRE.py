@@ -20,9 +20,6 @@ class Handlers:
     def __init__(self):
         pass 
     
-    # TODO: variants explosion
-    # Unhandled 2,(+2) at the moment
-    # Unhandled (+) might match group timing_sequence pattern
     @staticmethod
     def handle_timing_sequence(group: pl.DataFrame) -> pl.DataFrame:
         """
@@ -71,7 +68,6 @@ class Handlers:
 
         matching_rows = group.filter(patch_mask)
 
-        # Check how many rows matched
         if matching_rows.height > 0:
             log_chunk+=f"Applying patch to {matching_rows.height} rows with '(+c)' under cycle_length lb or ub"
 
@@ -95,7 +91,6 @@ class RegStringHandler:
 
         formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 
-        # Info-only handler → process.log
         info_handler = logging.FileHandler(f"{log_dir}/SRE.process.log", mode='w')
         info_handler.setLevel(logging.INFO)
         info_handler.addFilter(lambda record: record.levelno == logging.INFO)
@@ -161,16 +156,12 @@ class RegStringHandler:
         if log_chunk != "":
             self.logger.error(f"[PATCHED] Detected unhandled case - {log_chunk}")
 
-        # needed for matrix cration endpoint only!
         try:
             total_vector_len = get_last_cycle(group.select("timing_sequence").unique().to_series().to_list())
         except:
             print(group.select("timing_sequence").unique().to_series().to_list())
             raise ValueError("Processing total vector length is non-standard.")
 
-        # Is there any group size greater then 1?
-        # NOTE: current implementation does not support duplicate components per MAIN group
-        # Will be changed once variant_cui allows multipart Sigs... TODO
         component_groups = group.group_by("component")
         counter_mix = 0
         for g_drug, df in component_groups:
@@ -192,16 +183,9 @@ class RegStringHandler:
             cycle_length_ub = row['cycle_length_ub']
             cycle_length_unit = row['cycle_length_unit']
             
-            # extract all days 
-            # TODO: these are cleaned at the moment no (n+, c+) or (optional)... 
-            # Need to handle all cases
             idays = get_idays(allDays)
             
             
-            # TODO: This will create 2 subvariants shortStrings at the moment !
-            # Decided to keep it this way for now instead of range or single value
-            # Also in matrix, we are not mixing lb and ub at the moment!... ether all lb or ub...
-            # It uses set not to repeat indeterminate cases, since both are = 1
             cycle_lengths = set(map(float, [cycle_length_lb, cycle_length_ub]))
             
             # Logs
@@ -241,12 +225,10 @@ class RegStringHandler:
         except Exception as e:
             group_id = group.select(['condition', 'regimen', 'variant']).to_dicts()
             self.logger.error(f"[SKIPPED GROUP] Failed to create reg string {group_id} - [ERR] {e}")
-            # Tag the group rows with null regString (preserving row count)
             null_col = pl.Series("regString", [None] * group.height)
             null_cycle = pl.Series("cycleLength", [None] * group.height)
             return group.with_columns([null_col, null_cycle])
 
-        # How many regStrings are we generating?
         n_strings = len(group_reg_string)
 
         if n_strings == 0:
@@ -259,11 +241,8 @@ class RegStringHandler:
             self.logger.debug(f"N_STRINGS={n_strings} @ {group_id}")
             self.logger.debug(group_reg_string)
 
-        # duplicate the full group N times
         group_repeated = pl.concat([group] * n_strings, how="vertical")
-        # attach the regString column — one for each duplicate block
         reg_string_col = pl.Series("regString", group_reg_string).repeat_by(group.height).explode()
-        # cycle Length inference 
         all_tseqs = [self._infer_block_tseq(block) for _, block in group.group_by("timing_sequence", maintain_order=True)]
         cycle_length_value = max(all_tseqs) if all_tseqs else 1
         
@@ -272,7 +251,6 @@ class RegStringHandler:
             .repeat_by(group.height)
             .explode()
             )
-        # final frame
         group_with_regstrings = group_repeated.with_columns([
             reg_string_col,
             cycle_length_col
@@ -308,7 +286,6 @@ class RegStringHandler:
         condition_only_brackets = df["timing_sequence"].str.contains(r"^(\(.*?\),?)+$", literal=False)
         condition_mixed_brackets = df["timing_sequence"].str.contains(r"\(.*?\)", literal=False)
 
-        # Compute masks
         mask_only = condition_only_brackets
         mask_mixed = ~condition_only_brackets & condition_mixed_brackets
         mask_other = ~condition_only_brackets & ~condition_mixed_brackets
@@ -319,7 +296,6 @@ class RegStringHandler:
         )
 
         lb_not_maching_ub = self.get_cycle_length_mismatch_regimens(df)
-        # Log unique resgimen counts per category
         self.logger.info(f"[REPORT] Unique regimens (only brackets): {df.filter(mask_only)['regimen'].unique().height}")
         self.logger.info(f"[REPORT] Unique regimens (mixed brackets): {df.filter(mask_mixed)['regimen'].unique().height}")
         self.logger.info(f"[REPORT] Unique regimens (other): {df.filter(mask_other)['regimen'].unique().height}")
@@ -356,7 +332,6 @@ class RegStringHandler:
 
         progress.close()
 
-        # Log tracker summary to INFO log
         tracker_summary = "\n".join([f"{k}: {v}" for k, v in tracker.items()]) # not needed probably
         self.logger.info("--- Tracker Summary: ---\n" + tracker_summary)
 

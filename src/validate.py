@@ -3,15 +3,11 @@ import pandas as pd
 import re
 import io
 import sys
-#### 
-
-# set here only
 
 file_dir = sys.argv[1] # "output2"
 file_target = sys.argv[2] # "regimens_full.tsv"
 curr_dir = os.path.abspath(os.curdir)
 
-##
 
 out=os.path.abspath(f"{file_dir}/validation")
 out_file="shared_output_analysis.txt"
