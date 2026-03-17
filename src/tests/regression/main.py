@@ -103,14 +103,26 @@ def baseline_gh_push(version):
         capture_output=True
     ).stdout.strip()
     
-    # Stage only regression_staging/
-    subprocess.run(["git", "add", "-f", str(STAGING_DIR)], check=True)
+    # Create a new index in a temporary location
+    import os
+    import tempfile
     
-    # Get tree hash of staged files
-    tree_hash = subprocess.run(
-        ["git", "write-tree"],
-        capture_output=True, text=True, check=True
-    ).stdout.strip()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_index = os.path.join(tmpdir, "index")
+        env = os.environ.copy()
+        env["GIT_INDEX_FILE"] = tmp_index
+        
+        # Add only regression_staging/ to temporary index
+        subprocess.run(
+            ["git", "add", str(STAGING_DIR)],
+            env=env, check=True
+        )
+        
+        # Write tree from temporary index
+        tree_hash = subprocess.run(
+            ["git", "write-tree"],
+            env=env, capture_output=True, text=True, check=True
+        ).stdout.strip()
     
     # Create commit object
     commit_msg = f"chore: update baseline [baseline {version}]"
@@ -124,6 +136,7 @@ def baseline_gh_push(version):
             capture_output=True, text=True, check=True
         ).stdout.strip()
     else:
+        # Orphan commit - no parent
         commit_hash = subprocess.run(
             ["git", "commit-tree", tree_hash, "-m", commit_msg],
             capture_output=True, text=True, check=True
@@ -131,9 +144,6 @@ def baseline_gh_push(version):
     
     # Push commit to regression-data branch
     subprocess.run(["git", "push", "origin", f"{commit_hash}:refs/heads/{REGRESSION_BRANCH}"], check=True)
-    
-    # Clean up - unstage everything
-    subprocess.run(["git", "reset", "HEAD"], check=True)
     
     print(f"* Baseline pushed to {REGRESSION_BRANCH}")
 
@@ -219,13 +229,20 @@ def main():
         parser.print_help()
         sys.exit(1)
     
-    if args.pkl:
-        pkl_mode(args.pkl)
-    elif args.baseline:
-        version, output_dir = args.baseline
-        baseline_mode(version, output_dir)
-    elif args.test:
-        test_mode()
+    try:
+        if args.pkl:
+            pkl_mode(args.pkl)
+        elif args.baseline:
+            version, output_dir = args.baseline
+            baseline_mode(version, output_dir)
+        elif args.test:
+            test_mode()
+    finally:
+        # Cleanup stage
+        if STAGING_DIR.exists():
+            for item in STAGING_DIR.iterdir():
+                if item.name != ".gitkeep":
+                    item.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

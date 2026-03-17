@@ -35,10 +35,15 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
+          # Save baseline files from triggering commit BEFORE switching branches
+          mkdir -p /tmp/baseline_backup
+          cp regression_staging/baseline.pkl.zip /tmp/baseline_backup/
+          cp regression_staging/history.csv /tmp/baseline_backup/
+          
           # Fetch existing history if branch exists
           if git ls-remote --heads origin regression-data | grep -q regression-data; then
             git fetch origin regression-data
-            git show origin/regression-data:history.csv > history_existing.csv 2>/dev/null || true
+            git show origin/regression-data:history.csv > /tmp/baseline_backup/history_existing.csv 2>/dev/null || true
           fi
           
           # Create fresh orphan branch (no commit history)
@@ -47,15 +52,15 @@ jobs:
       
       - name: Update Baseline Files
         run: |
-          cp regression_staging/baseline.pkl.zip .
+          # Restore baseline from backup
+          cp /tmp/baseline_backup/baseline.pkl.zip .
           
-          # Merge history: append new entry to existing history
-          if [ -f history_existing.csv ]; then
-            head -n 1 history_existing.csv > history.csv
-            tail -n +2 history_existing.csv >> history.csv
-            tail -n 1 regression_staging/history.csv >> history.csv
+          # Build cumulative history
+          if [ -f /tmp/baseline_backup/history_existing.csv ]; then
+            cp /tmp/baseline_backup/history_existing.csv history.csv
+            tail -n +2 /tmp/baseline_backup/history.csv >> history.csv
           else
-            cp regression_staging/history.csv .
+            cp /tmp/baseline_backup/history.csv history.csv
           fi
           
           echo "*.zip binary" > .gitattributes
