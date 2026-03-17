@@ -19,3 +19,7 @@ INPUT_FILES_HEMONC/sigs_conditions.csv
 .stable_version
 .tmp*
 .tmp
+
+# regression test reports
+html/
+comparison_report.json

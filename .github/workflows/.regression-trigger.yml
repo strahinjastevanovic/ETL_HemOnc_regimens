@@ -1,0 +1,92 @@
+# .github/workflows/regression-trigger.yml
+name: Regression Test
+on:
+  push:
+    branches: ['**']
+
+jobs:
+  test:
+    if: contains(github.event.head_commit.message, '[test-regression]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install Dependencies
+        run: pip install pandas plotly jinja2 scipy seaborn matplotlib
+      
+      - name: Check for Checkpoint
+        run: |
+          if [ ! -d regression_staging ] || [ -z "$(ls -A regression_staging/*.pkl.zip 2>/dev/null)" ]; then
+            echo "Error: No checkpoint found in regression_staging/"
+            echo "Run locally:"
+            echo "  1. ./RunScript.sh -out output/"
+            echo "  2. python src/tests/regression/main.py --pkl output/"
+            echo "  3. git commit -m 'your message [test-regression]'"
+            exit 1
+          fi
+      
+      - name: Fetch Baseline
+        run: |
+          git fetch origin regression-data 2>/dev/null || {
+            echo "Error: No baseline branch exists"
+            echo "Create baseline first:"
+            echo "  1. ./RunScript.sh -out output/"
+            echo "  2. python src/tests/regression/main.py --baseline v1.0.0"
+            exit 1
+          }
+          git show origin/regression-data:baseline.pkl.zip > regression_staging/baseline.pkl.zip || {
+            echo "Error: baseline.pkl.zip not found in regression-data branch"
+            echo "Create baseline first:"
+            echo "  python src/tests/regression/main.py --baseline <version>"
+            exit 1
+          }
+      
+      - name: Run Regression Test
+        run: |
+          python src/tests/regression/main.py --test
+      
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./html
+          destination_dir: regression-reports/${{ github.sha }}
+      
+      - name: Comment Report Link
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const url = `https://${context.repo.owner}.github.io/${context.repo.repo}/regression-reports/${context.sha}/final_output.html`;
+            const comment = `**Regression Report Ready**\n\n[View Interactive Report](${url})`;
+            
+            if (context.eventName === 'pull_request') {
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comment
+              });
+            } else {
+              console.log(comment);
+            }
+      
+      - name: Clean Up Checkpoint
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git rm -rf regression_staging/*.pkl.zip
+          git commit --amend --no-edit
+          git push --force-with-lease

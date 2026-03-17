@@ -1,0 +1,66 @@
+name: Update Regression Baseline
+on:
+  push:
+    branches: ['**']
+
+jobs:
+  update:
+    if: contains(github.event.head_commit.message, '[baseline]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      - name: Extract Version from Commit
+        id: version
+        run: |
+          # Extract version from commit message like "[baseline v1.2.0]"
+          VERSION=$(echo "${{ github.event.head_commit.message }}" | grep -oP '\[baseline\s+v?\K[0-9]+\.[0-9]+\.[0-9]+' || echo "dev-$(date +%Y%m%d)")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+      
+      - name: Verify Baseline Exists
+        run: |
+          if [ ! -f regression_staging/baseline.pkl.zip ]; then
+            echo "Error: baseline.pkl.zip not found in regression_staging/"
+            echo "Run locally: python src/tests/regression/main.py --baseline ${{ steps.version.outputs.version }}"
+            exit 1
+          fi
+      
+      - name: Setup Regression Data Branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Fetch existing history if branch exists
+          if git ls-remote --heads origin regression-data | grep -q regression-data; then
+            git fetch origin regression-data
+            git show origin/regression-data:history.csv > history_existing.csv 2>/dev/null || true
+          fi
+          
+          # Create fresh orphan branch (no commit history)
+          git checkout --orphan regression-data
+          git rm -rf . 2>/dev/null || true
+      
+      - name: Update Baseline Files
+        run: |
+          cp regression_staging/baseline.pkl.zip .
+          
+          # Merge history: append new entry to existing history
+          if [ -f history_existing.csv ]; then
+            head -n 1 history_existing.csv > history.csv
+            tail -n +2 history_existing.csv >> history.csv
+            tail -n 1 regression_staging/history.csv >> history.csv
+          else
+            cp regression_staging/history.csv .
+          fi
+          
+          echo "*.zip binary" > .gitattributes
+          echo "*.pkl binary" >> .gitattributes
+          
+          git add baseline.pkl.zip history.csv .gitattributes
+          git commit -m "Update baseline: ${{ steps.version.outputs.version }} [commit: ${{ github.sha }}]"
+          git push origin regression-data --force
