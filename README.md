@@ -28,6 +28,7 @@ Automated regression testing with GitHub Actions:
 3. Add: `git add regression_stage`
 4. Commit with trigger: `git commit -m "feat: changes [test-regression]"`
 5. GitHub Action compares against baseline and publishes report
+6. (Optional) `git pull --rebase` 
 
 ### Create/Update Baseline
 1. Run pipeline: `./RunScript.sh -out baseline/`
