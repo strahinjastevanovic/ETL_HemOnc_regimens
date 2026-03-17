@@ -76,6 +76,12 @@ jobs:
             const url = `https://${context.repo.owner}.github.io/${context.repo.repo}/regression-reports/${context.sha}/final_output.html`;
             const comment = `**Regression Report Ready**\n\n[View Interactive Report](${url})`;
             
+            // Add to job summary (visible at top of workflow run)
+            await core.summary
+              .addHeading('** Regression Test Report **')
+              .addLink('View Interactive Report', url)
+              .write();
+            
             if (context.eventName === 'pull_request') {
               github.rest.issues.createComment({
                 issue_number: context.issue.number,
@@ -102,7 +108,7 @@ jobs:
           
           # Only commit if there are changes
           if ! git diff --cached --quiet; then
-            git commit --amend --no-edit
+            git commit --amend --no-edit --allow-empty
             git push --force-with-lease
           else
             echo "No checkpoint files to remove"
