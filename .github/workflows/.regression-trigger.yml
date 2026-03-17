@@ -37,21 +37,26 @@ jobs:
             exit 1
           fi
       
-      - name: Fetch Baseline
+      - name: Fetch Baseline from regression-data Branch
         run: |
-          git fetch origin regression-data 2>/dev/null || {
-            echo "Error: No baseline branch exists"
+          if ! git ls-remote --heads origin regression-data | grep -q regression-data; then
+            echo "Error: regression-data branch does not exist"
             echo "Create baseline first:"
-            echo "  1. ./RunScript.sh -out output/"
-            echo "  2. python src/tests/regression/main.py --baseline v1.0.0"
+            echo "  python src/tests/regression/main.py --baseline v1.0.0 baseline/"
             exit 1
-          }
-          git show origin/regression-data:baseline.pkl.zip > regression_staging/baseline.pkl.zip || {
+          fi
+          
+          git fetch origin regression-data
+          
+          # Extract baseline.pkl.zip from regression_staging/ subdirectory
+          if ! git show origin/regression-data:regression_staging/baseline.pkl.zip > regression_staging/baseline.pkl.zip 2>/dev/null; then
             echo "Error: baseline.pkl.zip not found in regression-data branch"
             echo "Create baseline first:"
-            echo "  python src/tests/regression/main.py --baseline <version>"
+            echo "  python src/tests/regression/main.py --baseline v1.0.0 baseline/"
             exit 1
-          }
+          fi
+          
+          echo "✅ Baseline fetched from regression-data branch"
       
       - name: Run Regression Test
         run: |

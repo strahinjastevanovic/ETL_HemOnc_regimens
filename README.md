@@ -25,16 +25,14 @@ Automated regression testing with GitHub Actions:
 ### Test Changes
 1. Run pipeline locally: `./RunScript.sh -out output/`
 2. Create checkpoint: `python src/tests/regression/main.py --pkl output/`
-3. Commit with trigger: `git commit -m "feat: changes [test-regression]"`
-4. GitHub Action compares against baseline and publishes report
+3. Add: `git add regression_stage`
+4. Commit with trigger: `git commit -m "feat: changes [test-regression]"`
+5. GitHub Action compares against baseline and publishes report
 
 ### Create/Update Baseline
-1. Run pipeline: `./RunScript.sh -out baseline`
-2. Create checkpoint: `python src/tests/regression/main.py --pkl baseline/`
-    - this will setup the stage for baseline
-3. Create and commit baseline: `python src/tests/regression/main.py --baseline v1.2.0`
-   - Auto commits and pushes
-   - GitHub Action updates `regression-data` branch
+1. Run pipeline: `./RunScript.sh -out baseline/`
+2. Create and commit baseline: `python src/tests/regression/main.py --baseline v1.2.0 baseline/`
+   - Auto commits and pushes `regression-data` branch
 
 ### Architecture
 - **Staging**: `staging/` stores checkpoints locally

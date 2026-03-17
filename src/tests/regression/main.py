@@ -159,15 +159,42 @@ def baseline_mode(version, output_dir):
     print(f"Creating baseline from {output_dir} (version: {version})...")
     checkpoint_file = create_checkpoint(output_dir, BASELINE_NAME)
     
-    # Create history entry
+    # Fetch existing history from regression-data branch
     history_file = STAGING_DIR / "history.csv"
-    if not history_file.exists():
-        with open(history_file, "w") as f:
-            f.write("date,version\n")
+    header = "date,version\n"
     
-    with open(history_file, "a") as f:
-        f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M')},{version}\n")
+    # Check if remote branch exists and has history
+    remote_exists = subprocess.run(
+        ["git", "ls-remote", "--heads", "origin", REGRESSION_BRANCH],
+        capture_output=True
+    ).stdout.strip()
     
+    if remote_exists:
+        # Fetch existing history from remote
+        result = subprocess.run(
+            ["git", "show", f"origin/{REGRESSION_BRANCH}:regression_staging/history.csv"],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            old_lines = result.stdout.splitlines(keepends=True)
+        else:
+            old_lines = [header]
+    else:
+        # Branch doesn't exist, create new history
+        old_lines = [header]
+    
+    # Append new entry
+    new_entry = f"{datetime.now().strftime('%Y-%m-%d %H:%M')},{version}\n"
+
+    # Prepend new entry after header
+    if old_lines[0].startswith("date,version"):
+        lines = [old_lines[0], new_entry] + old_lines[1:]
+    else:
+        lines = [new_entry] + old_lines
+
+    with open(history_file, "w") as f:
+        f.writelines(lines)
+        
     print(f"* Baseline created: {checkpoint_file}")
     print(f"* History updated: {history_file}")
     
@@ -238,8 +265,8 @@ def main():
         elif args.test:
             test_mode()
     finally:
-        # Cleanup stage
-        if STAGING_DIR.exists():
+        # Cleanup stage for baseline mode
+        if args.baseline and STAGING_DIR.exists():
             for item in STAGING_DIR.iterdir():
                 if item.name != ".gitkeep":
                     item.unlink(missing_ok=True)
