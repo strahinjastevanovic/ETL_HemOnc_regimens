@@ -92,6 +92,18 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git rm -rf regression_staging/*.pkl.zip
-          git commit --amend --no-edit
-          git push --force-with-lease
+          
+          # Remove only tracked checkpoint files
+          for file in regression_staging/*.pkl.zip; do
+            if [ -f "$file" ] && [ "$(basename "$file")" != "baseline.pkl.zip" ]; then
+              git rm -f "$file" 2>/dev/null || true
+            fi
+          done
+          
+          # Only commit if there are changes
+          if ! git diff --cached --quiet; then
+            git commit --amend --no-edit
+            git push --force-with-lease
+          else
+            echo "No checkpoint files to remove"
+          fi
