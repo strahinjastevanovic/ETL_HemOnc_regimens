@@ -35,10 +35,10 @@ Automated regression testing with GitHub Actions:
 2. Create and commit baseline: `python src/tests/regression/main.py --baseline v1.2.0 baseline/`
    - Auto commits and pushes `regression-data` branch
 
-### Architecture
-- **Staging**: `staging/` stores checkpoints locally
-- **Baseline Storage**: Orphan branch `regression-data` (single commit, force-pushed)
+### Repo Setup Rules
+- **Staging**: `regression_staging/` local checkpoints (GH actions input creation)
+- **Baseline Storage**: Orphan branch `regression-data`
 - **Reports**: Published to GitHub Pages at `regression-reports/{commit-sha}/`
-- **Comparison**: Jensen-Shannon divergence + Jaccard similarity metrics
+- **Comparison**: Drift detection
 
 See `src/tests/regression/research.md` for methodology details.

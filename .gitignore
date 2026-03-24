@@ -23,4 +23,6 @@ INPUT_FILES_HEMONC/sigs_conditions.csv
 # regression test reports
 html/
 comparison_report.json
+
+# Rule:     the pkl.zip is processed/removed by a GH action
 !regression_staging/*

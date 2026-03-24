@@ -10,7 +10,7 @@
 git commit -m "feat: new feature [test-regression]"
 git push
 ```
-Action: Triggers regression test, deploys HTML to GitHub Pages
+Action trigger:`[test-regression]` runs regression test, deploys HTML to GitHub Pasges
 
 
 ## Baseline Creation/Update (Local):
