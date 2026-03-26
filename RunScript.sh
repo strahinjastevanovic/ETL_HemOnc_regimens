@@ -46,29 +46,29 @@ SHEET_CONFIG="${REF_DIR}/sheets_config.json"
 echo -e "\n%%% Starting ETL... %%%\n"
 echo -e "%%%\n\nHemOnc Version:\n ${DESCRIPTION} \n\n%%%"
 echo -e "\n%%% Running Queries... %%%\n"
-python3 - <<EOF
-import sys
-import os
-from dotenv import load_dotenv
-load_dotenv(dotenv_path=os.path.join(os.getcwd(), '.env'))
-sys.path.insert(0, "${SRC_DIR}")
-from query_vocab import main
-if __name__ == "__main__":
-    credentials = {
-      "username":os.getenv('DB_USER'),
-      "password":os.getenv('DB_PASSWORD'),
-      "host":os.getenv('DB_HOST'),
-      "db":os.getenv('DB_NAME')
-    }
+# python3 - <<EOF
+# import sys
+# import os
+# from dotenv import load_dotenv
+# load_dotenv(dotenv_path=os.path.join(os.getcwd(), '.env'))
+# sys.path.insert(0, "${SRC_DIR}")
+# from query_vocab import main
+# if __name__ == "__main__":
+#     credentials = {
+#       "username":os.getenv('DB_USER'),
+#       "password":os.getenv('DB_PASSWORD'),
+#       "host":os.getenv('DB_HOST'),
+#       "db":os.getenv('DB_NAME')
+#     }
 
-    main(credentials,\
-    "${FILES_ROOT}/${SIGS_FILE}",\
-    "${WORKDIR}/condition_concepts.csv",\
-    "${WORKDIR}/drug_concepts.csv",\
-    "${WORKDIR}/sigs_w_conditions.csv",\
-    "${WORKDIR}/concepts.tsv",\
-    "${LOGS}")
-EOF
+#     main(credentials,\
+#     "${FILES_ROOT}/${SIGS_FILE}",\
+#     "${WORKDIR}/condition_concepts.csv",\
+#     "${WORKDIR}/drug_concepts.csv",\
+#     "${WORKDIR}/sigs_w_conditions.csv",\
+#     "${WORKDIR}/concepts.tsv",\
+#     "${LOGS}")
+# EOF
 
 echo -e "\n%%% Pre-processing... %%%\n"
 python3 - <<EOF

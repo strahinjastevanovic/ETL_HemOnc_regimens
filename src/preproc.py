@@ -1,4 +1,4 @@
-from pipeline.main import Preprocessor
+from process.controller import Preprocessor
 
 def preprocessing(
     sigs_file=".",
@@ -19,7 +19,7 @@ def preprocessing(
 
     dp = proc.get_processed()
 
-    proc.build_reports()
+    # proc.build_reports() #Intentialy sckipped - auth rules
 
     dp.write_parquet(f"{output_dir}/s_frame.parquet") 
     dp.write_csv(f"{output_dir}/s_frame.tsv", separator="\t") 
