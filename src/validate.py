@@ -1,19 +1,10 @@
-import os 
+import os
 import pandas as pd
 import re
 import io
 import sys
 
-file_dir = sys.argv[1] # "output2"
-file_target = sys.argv[2] # "regimens_full.tsv"
-curr_dir = os.path.abspath(os.curdir)
-
-
-out=os.path.abspath(f"{file_dir}/validation")
-out_file="shared_output_analysis.txt"
-os.makedirs(out, exist_ok=True)
-
-def process_all(file_dir):
+def process_all(file_dir, file_target, curr_dir):
 
     # Definitions Setup
     # OLD DATASETS SIGS only 2021
@@ -217,6 +208,22 @@ def markdown_table(file_path, df_shared, df, new_shared_mapping, df_old, old__sh
         f.write(output_buffer.getvalue())
 
 
-df_shared, df, new_shared_mapping, df_old, old__shared_mapping = process_all(file_dir)
-markdown_table(out + "/" + out_file, df_shared, df, new_shared_mapping, df_old, old__shared_mapping)
+def run(file_dir: str, file_target_path: str) -> None:
+    """Callable entry-point used by the Prefect task and tests."""
+    curr_dir = os.path.abspath(os.curdir)
+    out      = os.path.abspath(f"{file_dir}/validation")
+    out_file = "shared_output_analysis.txt"
+    os.makedirs(out, exist_ok=True)
+
+    df_shared, df, new_shared_mapping, df_old, old__shared_mapping = process_all(
+        file_dir, file_target_path, curr_dir
+    )
+    markdown_table(
+        out + "/" + out_file,
+        df_shared, df, new_shared_mapping, df_old, old__shared_mapping,
+    )
+
+
+if __name__ == "__main__":
+    run(sys.argv[1], sys.argv[2])
 

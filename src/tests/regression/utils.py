@@ -11,8 +11,14 @@ def set_path(base_dir_path):
     out_pkl = base_dir / "regression_checkpoint.pkl.zip"
 
     tsv_dir = base_dir / "report_tables"
+    # regimens_full.tsv is the unfiltered source of truth (pre-dedup, all rows).
+    # regimens.tsv is the shortString-deduped schedule index — excluded here because
+    # its row count is intentionally reduced by build_final_regimens and comparing it
+    # against a pre-Action-5 ref produces expected false negatives.
+    full_out = base_dir / "regimens_full.tsv"
     main_out = base_dir / "regimens.tsv"
-    tsv_files = list(tsv_dir.glob("*.tsv")) + [main_out]
+    extra = [f for f in [full_out, main_out] if f.exists()]
+    tsv_files = list(tsv_dir.glob("*.tsv")) + extra
 
     return out_pkl, tsv_files
 

@@ -93,14 +93,16 @@ echo -e "\n%%% Generating updated regimen groups and valid drugs... %%%\n"
 python3 - <<EOF
 import sys
 sys.path.insert(0, "${SRC_DIR}")
-from serialize import generate_reg_group, generate_valid_drugs 
+from data_model import generate_reg_group, generate_valid_drugs, generate_route_table, generate_shortString_table
 if __name__ == "__main__":
     generate_reg_group("${REGIMEN_TSV_FULL}", "${REF_RGROUPS}", workdir="${WORKDIR}")
     generate_valid_drugs("${REGIMEN_TSV_FULL}", "${WORKDIR}/drug_concepts.csv", workdir="${WORKDIR}")
+    generate_route_table("${REGIMEN_TSV_FULL}", workdir="${WORKDIR}")
+    generate_shortString_table("${REGIMEN_TSV_FULL}", workdir="${WORKDIR}")
 EOF
 
 echo -e "\n%%% Converting TSVs to RDA... %%%\n"
-Rscript "${SRC_DIR}/serialize.R" "${WORKDIR}"
+Rscript "${SRC_DIR}/export_artifacts.R" "${WORKDIR}"
 
 echo -e "\n%%% Running Validation... %%%\n"
 python3 "${SRC_DIR}/validate.py" "${WORKDIR}" "${REGIMEN_TSV_FULL}"
