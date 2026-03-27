@@ -37,7 +37,6 @@ FILES_ROOT="INPUT_FILES_HEMONC"
 REF_DIR="OTHER_REF"
 REF_RGROUPS="${REF_DIR}/rgroups_template.tsv"
 REF_VALIDDRUGS="${REF_DIR}/validdrugs_template.tsv"
-SUPP_FILE="${REF_DIR}/blacklist.json"
 REGIMEN_TSV="${WORKDIR}/regimens.tsv"
 REGIMEN_TSV_FULL="${WORKDIR}/regimens_full.tsv"
 LOGS="${WORKDIR}/logs"
@@ -76,7 +75,7 @@ import sys
 sys.path.insert(0, "${SRC_DIR}")
 from preproc import preprocessing
 if __name__ == "__main__":
-    preprocessing("${WORKDIR}/sigs_w_conditions.csv", "${WORKDIR}", "${LOGS}", "${SUPP_FILE}", "${SHEET_CONFIG}")
+    preprocessing("${WORKDIR}/sigs_w_conditions.csv", "${WORKDIR}", "${LOGS}", "${SHEET_CONFIG}")
 EOF
 
 echo -e "\n%%% Processing SIGs... %%%\n"

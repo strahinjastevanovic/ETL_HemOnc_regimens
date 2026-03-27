@@ -13,7 +13,7 @@ from .handle   import (
     RegimenHandler,
     VariantHandler,
     PatternHandlers,
-    SupplementaryHandler,
+    ByRoleHandler,
 )
 from .resolve  import (
     Resolver,
