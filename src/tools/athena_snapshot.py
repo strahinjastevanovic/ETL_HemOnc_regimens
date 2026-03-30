@@ -34,7 +34,16 @@ from __future__ import annotations
 import argparse
 import pickle
 import sys
+import urllib.request
 from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Default remote location of the pre-built snapshot bundle
+# ---------------------------------------------------------------------------
+_SNAPSHOT_URL = (
+    "https://github.com/strahinjastevanovic/ETL_HemOnc_regimens"
+    "/raw/athena_mirrors/OTHER_REF/AthenaFeb2025snapshot.pkl"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -71,20 +80,12 @@ def unpack(bundle_path: str | Path, out_dir: str | Path) -> dict[str, Path]:
 
     Returns a dict mapping key → written Path.
     """
-    out = Path(out_dir)
-    out.mkdir(parents=True, exist_ok=True)
-
     with open(bundle_path, "rb") as f:
         bundle = pickle.load(f)
 
     tag = bundle.get("tag", "unknown")
-    written: dict[str, Path] = {}
-    for key in ("condition_concepts", "drug_concepts", "sigs_w_conditions"):
-        dest = out / f"{key}.csv"
-        dest.write_text(bundle[key], encoding="utf-8")
-        written[key] = dest
-
-    print(f"[athena_snapshot] Unpacked tag={tag!r} from {bundle_path} → {out}/")
+    written = unpack_bundle(bundle, out_dir)
+    print(f"[athena_snapshot] Unpacked tag={tag!r} from {bundle_path} → {out_dir}/")
     return written
 
 
@@ -96,6 +97,39 @@ def describe(bundle_path: str | Path) -> None:
     for key in ("condition_concepts", "drug_concepts", "sigs_w_conditions"):
         lines = bundle[key].count("\n")
         print(f"  {key}: {lines:,} lines")
+
+
+def load_snapshot(out_dir: str | Path, url: str = _SNAPSHOT_URL) -> dict[str, Path]:
+    """
+    Download the pre-built Athena snapshot bundle from *url* and unpack it
+    into *out_dir*, writing:
+        condition_concepts.csv
+        drug_concepts.csv
+        sigs_w_conditions.csv
+
+    Returns a dict mapping key → written Path.
+
+    Used when DB_FRESH is not TRUE — no database credentials required.
+    """
+    print(f"[athena_snapshot] Fetching snapshot from:\n  {url}")
+    with urllib.request.urlopen(url) as resp:
+        bundle = pickle.loads(resp.read())
+
+    tag = bundle.get("tag", "unknown")
+    print(f"[athena_snapshot] Snapshot tag: {tag!r}")
+    return unpack_bundle(bundle, out_dir)
+
+
+def unpack_bundle(bundle: dict, out_dir: str | Path) -> dict[str, Path]:
+    """Write a pre-loaded bundle dict into *out_dir*. Returns key → Path."""
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    written: dict[str, Path] = {}
+    for key in ("condition_concepts", "drug_concepts", "sigs_w_conditions"):
+        dest = out / f"{key}.csv"
+        dest.write_text(bundle[key], encoding="utf-8")
+        written[key] = dest
+    return written
 
 
 # ---------------------------------------------------------------------------

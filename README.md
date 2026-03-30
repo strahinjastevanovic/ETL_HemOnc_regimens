@@ -5,17 +5,49 @@ For strategy and details see `assets/Assembler_main.md`
 
 ## Setup
 
-- You need to setup connection with OMOP CDM DB first. 
-See `.env.template`.
+Install dependencies from `requirements.txt`:
 
-- Install environment from `requirements.txt`
+```
+pip install -r requirements.txt
+```
+
+Copy `.env.template` to `.env` and configure the Athena vocabulary source:
+
+```
+cp .env.template .env
+```
+
+### Athena vocabulary source (`DB_FRESH`)
+
+The pipeline needs three Athena/OMOP vocabulary files
+(`condition_concepts.csv`, `drug_concepts.csv`, `sigs_w_conditions.csv`).
+How they are obtained is controlled by the `DB_FRESH` flag in `.env`:
+
+| `DB_FRESH` | Behaviour |
+|---|---|
+| `FALSE` *(default)* | Downloads the pre-built snapshot bundle from the [`athena_mirrors`](https://github.com/strahinjastevanovic/ETL_HemOnc_regimens/tree/athena_mirrors) branch and unpacks the CSVs directly into your output directory. **No database credentials required.** |
+| `TRUE` | Runs live SQL queries against your OMOP CDM instance. Requires `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_NAME` to be set in `.env`. |
+
+**Default (no DB setup needed):**
+```dotenv
+DB_FRESH=FALSE
+```
+
+**Live queries:**
+```dotenv
+DB_FRESH=TRUE
+DB_USER=myuser
+DB_PASSWORD=secret
+DB_HOST=db.example.com
+DB_NAME=omop_cdm
+```
 
 ## Run 
 
 Create regimens with the following command:
 
 ```
-./RunScript.sh -out output-assembled
+./RunScript.sh -out output.assembled
 ```
 
 ## Regression Testing
@@ -41,4 +73,4 @@ Automated regression testing with GitHub Actions:
 - **Reports**: Published to GitHub Pages at `regression-reports/{commit-sha}/`
 - **Comparison**: Drift detection
 
-See `src/tests/regression/research.md` for methodology details.
+See `src/tests/regression/docs` for methodology details.
