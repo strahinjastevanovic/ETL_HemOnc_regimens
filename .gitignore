@@ -26,3 +26,6 @@ comparison_report.json
 
 # Rule:     the pkl.zip is processed/removed by a GH action
 !regression_staging/*
+
+# temp
+src/assembler
