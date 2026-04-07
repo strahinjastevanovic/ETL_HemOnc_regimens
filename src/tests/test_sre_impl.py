@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]  # .../<repo>/src
 sys.path.insert(0, str(ROOT))
 
 from tools.sre_tools import collapse_event_matrix_wrapper, collapse_event_matrix
+from tools.sre_vec import build_component_vector
 
 
 
@@ -121,3 +122,28 @@ def test_collapse_event_matrix_wrapper_raises_on_all_zero_variant():
     }
     with pytest.raises(ValueError, match="zero-only"):
         collapse_event_matrix_wrapper(bad)
+
+
+def test_component_vector_basic():
+    cv = build_component_vector([1, 3], 5)
+    assert np.array_equal(cv, np.array([1, 0, 1, 0, 0]))
+
+
+def test_component_vector_day1_only():
+    cv = build_component_vector([1], 7)
+    assert np.array_equal(cv, np.array([1, 0, 0, 0, 0, 0, 0]))
+
+
+def test_component_vector_all_days():
+    cv = build_component_vector([1, 2, 3], 3)
+    assert np.array_equal(cv, np.array([1, 1, 1]))
+
+
+def test_component_vector_invalid_zero_length():
+    with pytest.raises(ValueError):
+        build_component_vector([1], 0)
+
+
+def test_component_vector_out_of_range():
+    with pytest.raises(ValueError):
+        build_component_vector([6], 5)

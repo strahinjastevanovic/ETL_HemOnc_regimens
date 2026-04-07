@@ -97,6 +97,19 @@ def generate_route_table(regimens_tsv_full, workdir="."):
                 f"has {len(component_rows)} rows but {len(route_regimen_pairs)} "
                 f"unique route-regimen pairs."
             )
+            duplicated = component_rows.duplicated(subset=['route', 'regName'], keep=False)
+            dup_rows = component_rows[duplicated]
+            dup_summary = (
+                dup_rows
+                .groupby(['route', 'regName'])
+                .size()
+                .reset_index(name='count')
+                .to_dict(orient='records')
+            )
+            logger.info(
+                f"[ROUTE EXPLOSION DETAILS] Component '{component_name}' (CUI: {cui}) "
+                f"duplicate route-regimen pairs: {dup_summary}"
+            )
 
         valid_pairs = route_regimen_pairs[
             ~route_regimen_pairs['route'].astype(str).isin(exclude_routes)
@@ -176,30 +189,48 @@ def generate_valid_drugs(regimen_tsv, validdrugs_query, workdir="."):
     """
 
     fin = pd.read_csv(regimen_tsv, sep='\t')
-    components_lower = fin['component'].str.lower().unique().tolist()
-    
-    vd_query = pd.read_csv(validdrugs_query)
-    vd_components_lower = vd_query['concept_name'].str.lower().unique().tolist()
 
-    sc = set(components_lower)
-    vd = set(vd_components_lower)
+    # Get unique components from regimens (case-insensitive)
+    unique_components = fin['component'].unique().tolist()
+    components_set = set(comp.lower() for comp in unique_components)
+
+    vd_query = pd.read_csv(validdrugs_query)
+    vd_concepts = set(comp.lower() for comp in vd_query['concept_name'].unique().tolist())
+
+    # Calculate overlap and gaps
+    shared_components = components_set.intersection(vd_concepts)
+    unmapped_components = components_set.difference(vd_concepts)
 
     logger = Logger(f"{workdir}/logs", filename="lineage.log")
-    logger.info(f"\n[INFO] components loaded from HemOnc: {len(sc)}\n"
-          f"[INFO] components loaded from athena: {len(vd)}\n"
-          f"[INFO] shared: {len(vd.intersection(sc))}\n"
-          f"[INFO] in HemOnc: {len(vd.difference(sc))}\n"
-          f"[INFO] in Athena: {len(sc.difference(vd))}\n"
-          )
-    
+    logger.info(f"\n[VALIDATION] Valid Drugs Component Mapping")
+    logger.info(f"[INFO] Total unique components in regimens: {len(components_set)}")
+    logger.info(f"[INFO] Total unique concepts from Athena: {len(vd_concepts)}")
+    logger.info(f"[INFO] Mapped components (in both): {len(shared_components)}")
+    logger.info(f"[INFO] Unmapped components (in regimens only): {len(unmapped_components)}")
+
+    if unmapped_components:
+        logger.warning(f"\n[WARNING] {len(unmapped_components)} component(s) not found in valid drugs vocabulary:")
+        for comp in sorted(unmapped_components):
+            original = next((c for c in unique_components if c.lower() == comp), comp)
+            logger.warning(f"  - {original}")
+        logger.info(f"\n[NOTE] Unmapped components typically include:")
+        logger.info(f"  * New/experimental drugs not yet in Athena")
+        logger.info(f"  * Non-drug interventions (e.g., External beam radiotherapy, BCG vaccine)")
+        logger.info(f"  * Biological/cell therapies (e.g., Allogeneic stem cells)")
+        logger.info(f"  * Treatment categories (e.g., Androgen-deprivation therapy)")
+        logger.info(f"  * All retained in pipeline; unmapped entries will not match OMOP concepts.")
+    else:
+        logger.info(f"\n[SUCCESS] All components have valid OMOP concept mappings!")
+
     for new_col, src_col in VALID_DRUGS_RELMAP.items():
-        if new_col:
+        if new_col and src_col in vd_query.columns:
             vd_query[new_col] = vd_query[src_col].values
-    
+
     out_cols = list(filter(None, VALID_DRUGS_RELMAP.keys()))
 
     if not set(out_cols).issubset(vd_query.columns):
-        raise ValueError(f"Missing required columns in reference file: {set(out_cols) - set(vd_query.columns)}")
+        missing = set(out_cols) - set(vd_query.columns)
+        raise ValueError(f"Missing required columns in valid drugs query: {missing}")
 
     vd_query = vd_query[out_cols]
     vd_query.to_csv(f"{workdir}/validdrugs.tsv", sep='\t', index=False)
