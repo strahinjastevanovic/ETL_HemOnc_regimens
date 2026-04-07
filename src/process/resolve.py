@@ -198,7 +198,7 @@ class ResolverIndefinite(Resolver):
         return patched_group, log_chunk
 
 class ResolverAllDays(Resolver):
-    """
+    r"""
         Resolve patterns in the `allDays` field.
 
         Regular patterns:     \d+

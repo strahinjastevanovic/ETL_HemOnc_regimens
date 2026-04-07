@@ -107,14 +107,18 @@ def main(
       "db":"db"
     },
     input_file = "INPUT_FILES_HEMONC/sigs.csv",
-    vocab_file_condition = "INPUT_FILES_HEMONC/sigs_conditions.csv", 
-    vocab_file_drugs = "INPUT_FILES_HEMONC/sigs_drugs.csv", 
-    output_file_conditions ="INPUT_FILES_HEMONC/sigs_w_conditions.csv",
+    vocab_file_condition = "INPUT_FILES_HEMONC/sigs_conditions.csv",
+    vocab_file_drugs = "INPUT_FILES_HEMONC/sigs_drugs.csv",
+    output_file_conditions = "INPUT_FILES_HEMONC/sigs_w_conditions.csv",
+    concepts_file = None,
     log_dir = None,
    ):
-  
+
   engine = create_engine(f"postgresql://{credentials['username']}:{credentials['password']}@{credentials['host']}/{credentials['db']}")
 
   run_query_conditions(engine, vocab_file_condition, input_file, log_dir, output_file_conditions)
 
   run_query_valid_drugs(engine, vocab_file_drugs, input_file, log_dir)
+
+  if concepts_file is not None:
+    run_query_concepts(engine, concepts_file, log_dir)
