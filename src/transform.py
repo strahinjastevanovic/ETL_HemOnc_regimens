@@ -1,6 +1,8 @@
 from tqdm import tqdm
 from tools.SRE import RegStringHandler  
-from tools.collapse_seq_naive import collapse
+from tools.seq_collapse import collapse_naive, filter_et
+from tools.regimen_formatter import build_final_regimens, analyze_shortstring_regimen_mapping
+import re
 import os
 import logging
 
@@ -81,32 +83,42 @@ class FrameProcessor:
 
 
 class FrameSanitizer:
-    def collapse_short_strings(self, df):
-        df['shortString'] = df['regString'].apply(collapse)
+    def make_short_strings(self, df):
+        # Remove internal @cycleLen markers before collapsing to shortString.
+        # Markers are internal bookkeeping used by SRE; canonical shortString
+        # format must be `<day>.<drug>;`.
+        def strip_cycle_len(s: str) -> str:
+            if not isinstance(s, str):
+                return s
+            return re.sub(r"@cyclelen\d+", "", s, flags=re.IGNORECASE)
+        df['shortString'] = df['regString'].apply(lambda x: collapse_naive(strip_cycle_len(x)))
         return df
 
-    def rename_columns(self, df):
-        return df.rename(columns={
-            "regimen": "regName", 
-            "regimen_cui":"regCode",
-            "condition_cui" : "conditionCode"
-        })
+    # columns name sync - format output
+    regimens2Hemonc = {
+        "conditionCode": "condition_cui",
+        "regName": "regimen",
+        "regCode": "regimen_cui",
+        "componentCode": "component_cui",
+        "regCodeExt": None,
+        "context": None,
+        "contextCode": None,
+        "day": None,
+        "cycleTaken": None,
+        "noCycles": None,
+        "branchInfo": None,
+        "Radio.Therapy.": None,
+        "continuous": None,
+        "noCycles_Original": None,
+    }
 
-    def select_columns(self, df):
-        df["metaCondition"] = "all" 
-        cols = [ 
-            "metaCondition",
-            "condition",
-            "conditionCode",
-            "regName",
-            "variant",
-            "regCode",
-            "component",
-            "cycleLength",
-            "regString",
-            "shortString"
-            ]  
-        return df[cols]
+    def translate(self, df):
+        cols_to_translate = {v: k for k, v in self.regimens2Hemonc.items() if v is not None}
+        return df.rename(columns=cols_to_translate)
+
+    def add_metacondition(self, df):
+        df["metaCondition"] = "all"
+        return df
 
     def validate_fields(self, df):
         if df.empty:
@@ -116,51 +128,79 @@ class FrameSanitizer:
         return df
 
 
-class Deduplicator:
-    def per_condition(self, df):
-        return (
-            df.sort_values(by=["shortString", "condition"], ascending=[True, False])
-              .groupby("condition", group_keys=False)
-              .apply(lambda g: g.drop_duplicates(subset="shortString", keep="first"))
-        )
-
-    def global_unique(self, df):
-        return (
-            df.sort_values(by=["shortString", "condition"], ascending=[True, False])
-              .drop_duplicates(subset="shortString", keep="first")
-        )
-
-
 class Transform:
     def __init__(self, ):
         self.processor = FrameProcessor()
         self.sanitizer = FrameSanitizer()
-        self.dedup = Deduplicator()
         self.logger = Logger()
+        self.selected_columns = [
+            "metaCondition",
+            "condition",
+            "conditionCode",
+            "regName",
+            "variant",
+            "regCode",
+            "component",
+            "cycleLength",
+            "regString",
+            "shortString",
+        ]
+        self.selected_columns_raw = [
+            "metaCondition",
+            "condition",
+            "conditionCode",
+            "regName",
+            "variant",
+            "regCode",
+            "component",
+            "componentCode",
+            "cycleLength",
+            "route",
+            "regString",
+            "shortString",
+        ]
 
-    def run(self, sigs_path="results/s_frame.parquet", output_path="results/regimens_nsclc.tsv",logs_dir="logs"):
-        print("\n --- Running Transformation Process... --- \n")
-        
+    def run(self, sigs_path="results/s_frame.parquet", output_path="results/regimens_nsclc.tsv", logs_dir="logs", debug=False):
+        print("--- Running Transformation Process. Use debug=True to speedup. ---")
+
         os.makedirs(logs_dir, exist_ok=True)
         workdir = os.path.dirname(output_path)
         self.logger.set_logs_output(logs_dir)
 
+        # ---- SKIP IF OUTPUT EXISTS AND NON-EMPTY ----
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 0 and debug:
+            self.logger.logger.info(f"[SKIP] Output already exists and is non-empty: {output_path}")
+            print("--- Transform skipped (output already exists) ---")
+            return 1
+
+        # ---- build base frame ----
         frame = self.processor.run(sigs_path, logs_dir)
         frame = self.sanitizer.validate_fields(frame)
-        frame = self.sanitizer.collapse_short_strings(frame)
-        frame = self.sanitizer.rename_columns(frame)
-        frame = self.sanitizer.select_columns(frame)
+        frame = self.sanitizer.make_short_strings(frame)
+        frame = self.sanitizer.translate(frame)
+        frame = self.sanitizer.add_metacondition(frame)
 
+        # ---- logging / diagnostics ----
         self.logger.log_reports_and_sumstats(frame)
         self.logger.short_string_stats(frame)
 
         frame.to_csv(f"{workdir}/frame.checkpoint.tsv", sep='\t')
 
-        per_condition = self.dedup.per_condition(frame)
-        per_condition.to_csv(output_path.replace(".tsv", "_full.tsv"), sep='\t', index=False)
+        # ---- FULL OUTPUT (pre-dedup, all rows, with componentCode + route) ----
+        # Written first — regimens_full.tsv is the unfiltered source of truth.
+        # No deduplication applied. One row per (condition, regCode, variant, component).
+        full_path = output_path.replace(".tsv", "_full.tsv")
+        frame[self.selected_columns_raw].to_csv(full_path, sep="\t", index=False)
+        self.logger.logger.info(f"[FULL OUTPUT] Saved to {full_path} ({frame.shape[0]} rows)")
 
-        global_unique = self.dedup.global_unique(frame)
-        global_unique.to_csv(output_path, sep='\t', index=False)
+        # ---- REGIMENS INDEX (shortString-deduped, authoritative schedule index) ----
+        # One row per unique shortString. Full condition×regimen expansion is in
+        # regimens_shortStrings.tsv (generated by data_model.generate_shortString_table).
+        analyze_shortstring_regimen_mapping(frame, logs_dir)
+
+        final_regimens = build_final_regimens(frame, logs_dir)
+        final_regimens[self.selected_columns].to_csv(output_path, sep="\t", index=False)
+        self.logger.logger.info(f"[REGIMENS OUTPUT] Schedule index saved to {output_path} ({final_regimens.shape[0]} rows)")
 
         print("--- Transform Process Completed Successfully! ---")
 

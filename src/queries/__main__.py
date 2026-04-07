@@ -8,4 +8,4 @@ spec = importlib.util.spec_from_file_location("query_runner", mod_path)
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 
-from .vocab_query import query_valid_drugs, query_conditions
+from .vocab import query_valid_drugs, query_conditions

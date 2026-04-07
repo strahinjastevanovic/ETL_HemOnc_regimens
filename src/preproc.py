@@ -1,10 +1,9 @@
-from pipeline.main import Preprocessor
+from process.controller import Preprocessor
 
 def preprocessing(
     sigs_file=".",
     output_dir="workdir",
-    log_dir= "log_dir",
-    supplementary_file=".",
+    log_dir="log_dir",
     sheet_config=None,
 ):
 
@@ -13,13 +12,12 @@ def preprocessing(
         sigs_path=sigs_file,
         output_dir=output_dir,
         log_dir=log_dir,
-        supplementary_file=supplementary_file,
         sheet_config=sheet_config
     ).initialize().run()
 
     dp = proc.get_processed()
 
-    proc.build_reports()
+    proc.build_reports() #Intentialy sckipped - auth rules
 
     dp.write_parquet(f"{output_dir}/s_frame.parquet") 
     dp.write_csv(f"{output_dir}/s_frame.tsv", separator="\t") 

@@ -1,6 +1,4 @@
 import polars as pl
-import json
-import re
 
 
 class Frame:
@@ -15,7 +13,7 @@ class Frame:
         frame = pl.read_csv(
             sigs_path,
             schema_overrides=utf8_schema,
-            null_values=["null", "NA", "NUB", "", "-"]
+            null_values=["null", "NA", "", "-"]
         )
         return frame
 
@@ -71,7 +69,7 @@ class NullValueHandlers:
             ).alias("has_null_in_sig")
         ])
 
-        # Find (regimen_cui, variant_cui) groups with any nulls
+        # Find (regimen_cui, variant_key) groups with any nulls
         variant_with_nulls = (
             frame
             .group_by(group_keys)
@@ -109,7 +107,7 @@ class RegimenHandler:
         )
         self.logger.info(f"[REPORT] Total regimens per condition (unique): {unique_regimens_per_conditions}")
 
-        group_keys_w_cui = ["condition", "condition_cui", "regimen", "regimen_cui", "variant", "variant_cui"]
+        group_keys_w_cui = ["condition", "condition_cui", "regimen", "regimen_cui", "variant", "variant_key"]
         unique_groups = (
             frame.select(group_keys_w_cui)
                 .unique()
@@ -186,15 +184,15 @@ class RegimenHandler:
             )
             .select([
                 "regimen", 
-                "variant_cui", 
+                "variant_key", 
                 "component_count_in_this_variant", 
                 "components"
             ])
             .with_columns(
                 pl.col("components").list.join(", ").alias("components")  # Stringify 
             )
-            .unique(subset=["regimen", "variant_cui", "components"])  # Dedup
-            .sort(["regimen", "variant_cui"])
+            .unique(subset=["regimen", "variant_key", "components"])  # Dedup
+            .sort(["regimen", "variant_key"])
         )
         self.reporter.to_tsv(variant_component_report, f"{report_name}_variants")
         return frame_good
@@ -204,21 +202,21 @@ class VariantHandler:
         self.logger = logger
         self.reporter = reporter
 
-    def create_checkopoint_frame(self, frame, group_keys):
+    def save_checkpoint(self, frame, group_keys):
         """Create checkpoint of variant groups (to verify nothing is lost)"""
         return frame.select(group_keys).unique()
 
-    def handle_partial_variants(self, frame, group_keys):
+    def handle_partial(self, frame, group_keys):
         """Logs variant and parts status"""
 
         # Total variants and unique regimen-variant pairs
         uniq = frame.select(group_keys).unique()
         n_variants = uniq.height
         regimen_variants = (
-            uniq.select(["regimen_cui", "variant_cui"])
+            uniq.select(["regimen_cui", "variant_key"])
                 .unique()
                 .group_by("regimen_cui")
-                .agg(pl.col("variant_cui").n_unique().alias("n_variant"))
+                .agg(pl.col("variant_key").n_unique().alias("n_variant"))
         )
 
         self.reporter.to_tsv(regimen_variants, "regimen_variants_n_unique")
@@ -246,7 +244,7 @@ class VariantHandler:
             .agg([
                 pl.count().alias("count"),
                 pl.col("regimen").n_unique().alias("n_regimens"),
-                pl.col("variant_cui").n_unique().alias("n_variants"),
+                pl.col("variant_key").n_unique().alias("n_variants"),
                 pl.col("regimen").unique().alias("regimens")
             ])
         )
@@ -259,7 +257,7 @@ class VariantHandler:
         multi_part_df = s.filter(pl.col("sig_type") == "Multi-part Sig") 
         single_part_df = s.filter(pl.col("sig_type") == "Single-part Sig")
 
-        self.reporter.report(multi_part_df, "multi_part_sigs", pattern="Sig entry contains multi step variants", field="step_number", status="N")
+        self.reporter.report(multi_part_df, "multi_part_sigs", pattern="Sig entry contains multi step variants", field="step_number", status="P")
         self.reporter.report(single_part_df, "single_part_sigs", pattern="Sig with only single step variants. Not idiosyncratic", field="step_number", status="H")
 
         # cleaning
@@ -272,47 +270,76 @@ class PatternHandlers:
         self.logger = logger 
         self.reporter = reporter
     
-    def log_indefinite_cycle_length(self, frame, group_keys):
-        """checks cycle_length for indeterminate - indefinite value handler"""
+    def timing_sequence():
+        pass
 
+    def cycle_length_indeterminate(self, frame, group_keys):
+        """Checks for indeterminate cycle length units and non-numeric bounds"""
+
+        # Detect group keys that contain indeterminate cycle units OR non-numeric cycle length bounds
+        pattern = r"[^\d\.]"  # Anything that's not a digit or dot
+
+        # Boolean mask for bad bounds (non-numeric strings)
+        bad_bounds_mask = (
+            pl.col("cycle_length_lb").str.contains(pattern)
+            | pl.col("cycle_length_ub").str.contains(pattern)
+        )
+
+        # Main condition: either indeterminate unit or bad bounds
+        indefinite_mask = (
+            (pl.col("cycle_length_unit") == "indeterminate")
+            | bad_bounds_mask
+        )
+
+        # Identify affected groups
         groups_with_indeterminate = (
             frame
+            .with_columns([
+                indefinite_mask.alias("has_indefinite")
+            ])
             .group_by(group_keys)
             .agg([
-                (pl.col("cycle_length_unit") == "indeterminate").any().alias("has_indeterminate")
+                pl.col("has_indefinite").any().alias("has_indefinite")
             ])
-            .filter(pl.col("has_indeterminate"))
+            .filter(pl.col("has_indefinite"))
         )
 
-        cycle_length_unit_indefinite = (
-            groups_with_indeterminate
-            .shape[0]
+        # Count of affected groups
+        indefinite = groups_with_indeterminate.height
+
+        # Join to get full rows
+        indefinite_df = frame.join(groups_with_indeterminate, on=group_keys, how="inner")
+        non_indefinite_df = frame.join(groups_with_indeterminate, on=group_keys, how="anti")
+
+        # Reporting
+        self.reporter.report(
+            indefinite_df,
+            "cycle_length_unit_indefinite",
+            pattern="Cycle length unit is indeterminate or cycle length bounds are non-numeric.",
+            field="{unit}",
+            status="P"
         )
 
-        cycle_length_unit_indefinite_df = frame.join(groups_with_indeterminate, on=group_keys, how="inner")
-        self.reporter.report(cycle_length_unit_indefinite_df, "cycle_length_unit_indefinite", pattern="Cycle length unit is indeterminate.", field="{unit}", status="P")
-
-        cycle_length_unit_indefinite_regimens_unique = (
-            frame
-            .filter(pl.col("cycle_length_unit") == "indeterminate")
+        # Count unique regimens with indeterminate or invalid data
+        indefinite_regimens_unique = (
+            indefinite_df
             .group_by("regimen_cui")
             .agg([
-                pl.col("variant_cui").n_unique().alias("n_variant")
+                pl.col("variant_key").n_unique().alias("n_variant")
             ])
             .select(pl.col("n_variant").sum())
             .item()
         )
 
-        self.logger.info(f"[REPORT] Number of variants with indefinite cycles: {cycle_length_unit_indefinite} ({cycle_length_unit_indefinite_regimens_unique} unique)")
+        # Ensure output has original column structure
+        indefinite_df = indefinite_df.select(frame.columns)
+        non_indefinite_df = non_indefinite_df.select(frame.columns)
 
-    def log_cycle_length_indefinite(self,fields): # TODO
-        """Logs cases where (+c or c) exist in cycle_length_ub or cycle_length_lb"""
-        pass 
-    
-    def log_field_indefinite(self, fields): # TODO
-        """Logs cases where allDays (+c, +n)  or timing_sequence (+c, +n, +1, +2) exist in <fields>"""
-        pass
-    
+        self.logger.info(
+            f"[REPORT] Number of variants with indefinite cycles: {indefinite} ({indefinite_regimens_unique} unique)"
+        )
+
+        return indefinite_df, non_indefinite_df
 
     # Filters by variant
     def all_days_pattern_handler(self, frame, group_keys): 
@@ -332,7 +359,7 @@ class PatternHandlers:
         invalid_groups_keys = invalid_groups.select(group_keys).unique().height
 
         self.logger.info(f"[REPORT] Number of variants with unhandled allDays pattern: {invalid_groups_keys}")
-        self.reporter.report(invalid_groups, "with_allDays_pattern",pattern="Negative units, optional elements, starting on 0th day", field="{ad}", status="N")
+        self.reporter.report(invalid_groups, "with_allDays_pattern",pattern="Negative units, optional elements, starting on 0th day", field="{ad}", status="P")
        
         # Safeguard
         leaks = valid_groups.filter(
@@ -379,4 +406,75 @@ class PatternHandlers:
             raise RuntimeError("Group filter failed — bad pattern leaked post-filter.")
 
         return valid_groups, invalid_groups
+
+    def cyclen_mismatch_regimen_handler(df: pl.DataFrame) -> int:
+        numeric_pattern = r"^\d+(\.\d+)?$"
+
+        return pl.concat(
+            [
+                df.filter(
+                    df["cycle_length_lb"].str.contains(numeric_pattern, literal=False)
+                    & df["cycle_length_ub"].str.contains(numeric_pattern, literal=False)
+                )
+                .with_columns(
+                    [
+                        pl.col("cycle_length_lb").cast(pl.Float64).alias("lb"),
+                        pl.col("cycle_length_ub").cast(pl.Float64).alias("ub"),
+                    ]
+                )
+                .filter(pl.col("lb") != pl.col("ub")),
+                df.filter(
+                    ~df["cycle_length_lb"].str.contains(numeric_pattern, literal=False)
+                    & ~df["cycle_length_ub"].str.contains(numeric_pattern, literal=False)
+                    & df["cycle_length_lb"].is_not_null()
+                    & df["cycle_length_ub"].is_not_null()
+                    & (pl.col("cycle_length_lb") != pl.col("cycle_length_ub"))
+                ),
+            ],
+            how="vertical_relaxed",
+        )["regimen"].unique().height
+
+
+class ByRoleHandler:
+    def __init__(self, logger: object, reporter: object):
+        self.logger = logger
+        self.reporter = reporter
+
+    def filter_by_role(self, frame: pl.DataFrame, group_keys: list[str], field: str = "component_role") -> pl.DataFrame:
+        dropped_groups = []
+        dropped_info = []
+
+        for value, name in [
+            ("secondary systemic", "component_role_secondary_systemic"),
+            ("locoregional", "component_role_locoregional")
+        ]:
+            # Find all variants containing this role
+            subset = frame.filter(pl.col(field) == value)
+
+            # Only keys (for grouping/removal)
+            subset_keys = subset.select(group_keys).unique()
+            dropped_groups.append(subset_keys)
+
+            # Reporting for this specific role
+            self.reporter.report(subset, name, pattern=f"Filtered component by role - {value}.", field="{co}, {cr}", status="N")
+            dropped_info.append((value, subset.height))
+
+        # Merge all dropped groups
+        all_dropped = pl.concat(dropped_groups) if dropped_groups else pl.DataFrame(schema={k: pl.Utf8 for k in group_keys})
+        all_dropped = all_dropped.unique()
+
+        # Summary stats
+        total_variants = frame.select(group_keys).unique().height
+        dropped_variants = all_dropped.height
+        ratio = round((dropped_variants / total_variants) * 100, 2) if total_variants else 0.0
+
+        for value, count in dropped_info:
+            self.logger.info(f"[REPORT] Variants with '{value}' role: {count}")
+        self.logger.info(
+            f"[REPORT] Total dropped variants: {dropped_variants}/{total_variants} ({ratio}%) "
+            f"due to disallowed component roles."
+        )
+
+        # Exclude those variant groups
+        return frame.join(all_dropped, on=group_keys, how="anti")
 

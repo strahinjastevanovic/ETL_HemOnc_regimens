@@ -17,11 +17,7 @@
         "desc": "Regimens containing variants with heterogeneous cycle lengths or step numbers.",
         "skip": 1
     },
-    "supplementary_dropped_regimen_title.reported": {
-        "name": "Supplementary Blacklist (Titles)",
-        "desc": "Regimens excluded due to blacklisted keywords found in the regimen title.",
-        "skip": 1
-    },
+
     "unique_groups": {
         "name": "Unique Regimen Groups",
         "desc": "Synthetically generated unique keys based on Condition CUI, Regimen CUI, and Variant Key."
@@ -30,11 +26,7 @@
         "name": "Non-Equal Component Distribution",
         "desc": "Identifies regimens where variant components do not align in frequency or count."
     },
-    "supplementary_dropped.reported": {
-        "name": "Supplementary Blacklist",
-        "desc": "Regimens excluded based on the supplementary therapy/blacklist configuration.",
-        "skip": 1
-    },
+
     "component_role_secondary_systemic.reported": {
         "name": "Secondary Systemic Roles",
         "desc": "Regimens containing components explicitly flagged with locoregional or secondary systemic roles."

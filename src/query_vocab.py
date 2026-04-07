@@ -3,26 +3,19 @@ from sqlalchemy import create_engine
 import logging 
 import os
 
-from queries.vocab_query import (
-  query_valid_drugs as drugs_sql, 
-  query_conditions as condition_sql,
-  query_concepts, 
-  query_concepts_log
-)
+from queries.vocab import query_valid_drugs as drugs_sql, query_conditions as condition_sql
+from queries.vocab import query_concepts, query_concepts_log
 
 
 def get_logger(log_path: str) -> logging.Logger:
     os.makedirs(os.path.dirname(log_path), exist_ok=True)  
-
     logger = logging.getLogger(log_path)  # use log path as name to allow multiple loggers
     logger.setLevel(logging.INFO)
-
     if not logger.handlers:
         fh = logging.FileHandler(log_path, mode='w')  # overwrite each time
         formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
         fh.setFormatter(formatter)
         logger.addHandler(fh)
-
     return logger
 
 def log_column_differences(df, col1, col2, logger):
@@ -114,17 +107,18 @@ def main(
       "db":"db"
     },
     input_file = "INPUT_FILES_HEMONC/sigs.csv",
-    vocab_file_condition = "INPUT_FILES_HEMONC/sigs_conditions.csv", 
-    vocab_file_drugs = "INPUT_FILES_HEMONC/sigs_drugs.csv", 
-    output_file_conditions ="sigs_w_conditions.csv",
-    output_file_concepts = "concepts.tsv",
+    vocab_file_condition = "INPUT_FILES_HEMONC/sigs_conditions.csv",
+    vocab_file_drugs = "INPUT_FILES_HEMONC/sigs_drugs.csv",
+    output_file_conditions = "INPUT_FILES_HEMONC/sigs_w_conditions.csv",
+    concepts_file = None,
     log_dir = None,
    ):
-  
+
   engine = create_engine(f"postgresql://{credentials['username']}:{credentials['password']}@{credentials['host']}/{credentials['db']}")
 
   run_query_conditions(engine, vocab_file_condition, input_file, log_dir, output_file_conditions)
 
   run_query_valid_drugs(engine, vocab_file_drugs, input_file, log_dir)
 
-  run_query_concepts(engine, output_file_concepts, log_dir)
+  if concepts_file is not None:
+    run_query_concepts(engine, concepts_file, log_dir)

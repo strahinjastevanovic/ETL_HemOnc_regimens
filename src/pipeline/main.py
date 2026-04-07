@@ -9,13 +9,12 @@ from pipeline.handlers import (
     RegimenHandler,
     VariantHandler,
     PatternHandlers,
-    SupplementaryHandler,
 )
 from pipeline.report import Reporter, build_reports
 from pipeline.resolvers import Resolver
 
 class Preprocessor:
-    def __init__(self, sigs_path, output_dir, log_dir=".", supplementary_file=None, sheet_config=None):
+    def __init__(self, sigs_path, output_dir, log_dir=".", sheet_config=None):
        
         self.logger     = Logger(log_dir, )
         self.audits     = AuditColumnTypes(log_dir, "PRE.audit.log")
@@ -25,7 +24,6 @@ class Preprocessor:
         self.config     = sheet_config
 
         self.s          = Frame().load_data(sigs_path)
-        self.sf         = supplementary_file
         self.group_keys = ["condition_cui", "regimen_cui", "variant_cui"]
         self.sigs_anatomy_essentials = [
             'variant_cui', 
@@ -41,7 +39,6 @@ class Preprocessor:
         self.regimen_handler     = RegimenHandler(self.logger, self.reporter)
         self.variant_handler     = VariantHandler(self.logger, self.reporter)
         self.pattern_handlers    = PatternHandlers(self.logger, self.reporter)
-        self.supp_handler        = SupplementaryHandler(self.logger, self.reporter)
         self.tracker             = Tracker(self.logger)
         self.resolver            = Resolver(self.logger, self.reporter)
         return self # enables chaining
@@ -56,12 +53,8 @@ class Preprocessor:
         frame = self.s.clone()
         group_keys = self.group_keys
         fields = self.sigs_anatomy_essentials
-        supplementary_file = self.sf
 
-        # ----------- 1 level subset block -component level dropouts, variants kept ------------
-        frame = self.supp_handler.clean_by_role(frame, group_keys) 
-
-        # ----------- 2 level subset block -regimen level dropouts ------------
+        # ----------- 1. regimen level dropouts ------------
         frame = self.null_handlers.handle_nan_in_condition(frame)
         frame = self.null_handlers.handle_nan_in_group_keys(frame, group_keys)
         frame = self.null_handlers.handle_null_in_sigs(frame, fields, group_keys)
